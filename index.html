@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="uk"><head><meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover"/>
+<title>Blackhole Battle</title>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+<meta name="apple-mobile-web-app-title" content="Blackhole"/>
+<meta name="theme-color" content="#03020a"/>
+<link rel="manifest" href="manifest.webmanifest"/>
+<link rel="apple-touch-icon" href="icon-180.png"/>
+<link rel="icon" href="icon-192.png"/>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-select:none}
+html,body{position:fixed;overscroll-behavior:none;-webkit-touch-callout:none;-webkit-text-size-adjust:100%;width:100%;height:100%;overflow:hidden;background:#03020a;font-family:system-ui,'Segoe UI',Roboto,sans-serif;touch-action:none;color:#ede9fe}
+#c{position:fixed;inset:0;width:100%;height:100%;display:block}
+#ui{position:fixed;inset:0;pointer-events:none;z-index:5}
+.scr{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;opacity:0;visibility:hidden;transition:opacity .25s;pointer-events:auto}
+.scr.on{opacity:1;visibility:visible}
+.dim{background:rgba(3,2,10,.55);backdrop-filter:blur(3px)}
+h1{font-size:44px;line-height:1;font-weight:900;letter-spacing:3px;text-align:center;background:linear-gradient(180deg,#fff,#c4b5fd 60%,#7c3aed);-webkit-background-clip:text;color:transparent;filter:drop-shadow(0 0 18px rgba(168,85,247,.8))}
+.sub{color:#a5b4fc;margin:10px 0 34px;letter-spacing:2px;font-size:13px;text-transform:uppercase}
+.btn{pointer-events:auto;border:0;border-radius:18px;padding:15px 30px;min-width:220px;margin:7px;font-size:18px;font-weight:800;color:#fff;background:linear-gradient(135deg,#7c3aed,#c026d3);box-shadow:0 6px 24px rgba(168,85,247,.55),inset 0 1px 0 rgba(255,255,255,.3)}
+.btn:active{transform:scale(.95)}
+.btn.g{background:linear-gradient(135deg,#1e293b,#334155);box-shadow:0 4px 14px rgba(0,0,0,.5),inset 0 1px 0 rgba(255,255,255,.12)}
+.btn.s{min-width:0;padding:10px 18px;font-size:14px;border-radius:14px}
+.panel{background:linear-gradient(180deg,rgba(30,16,60,.95),rgba(10,6,24,.96));border:1px solid rgba(168,85,247,.6);border-radius:26px;padding:24px 20px;text-align:center;width:min(330px,92%);box-shadow:0 0 50px rgba(124,58,237,.45)}
+.panel h2{font-size:26px;margin-bottom:6px;text-shadow:0 0 16px #a855f7}
+.sector{width:min(320px,92%);margin:8px;padding:16px;border-radius:20px;border:1px solid rgba(168,85,247,.5);background:linear-gradient(135deg,rgba(76,29,149,.55),rgba(15,23,42,.8));text-align:left;pointer-events:auto}
+.sector b{font-size:19px;display:block}.sector small{color:#c4b5fd}
+.sector.lock{opacity:.4}
+.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;width:min(330px,94%);margin:14px 0}
+.lv{aspect-ratio:1;border-radius:16px;border:1px solid rgba(168,85,247,.55);background:rgba(30,16,60,.8);color:#fff;font-size:20px;font-weight:800;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:auto}
+.lv span{font-size:11px;color:#fde047;letter-spacing:1px}
+.lv.lock{opacity:.3}
+#hud{position:absolute;left:0;right:0;top:0;padding:10px 12px;display:none;justify-content:space-between;align-items:flex-start;gap:8px}
+.chip{background:rgba(8,6,22,.72);border:1px solid rgba(148,130,255,.35);border-radius:12px;padding:5px 10px;font-size:13px;margin-bottom:5px;backdrop-filter:blur(6px);white-space:nowrap}
+.chip b{color:#fde047}
+.col{display:flex;flex-direction:column;align-items:flex-start}.col.r{align-items:flex-end}
+.pips i{display:inline-block;width:12px;height:18px;margin-left:3px;border-radius:6px 6px 3px 3px;background:#22d3ee;box-shadow:0 0 8px #22d3ee}
+.pips i.u{background:#334155;box-shadow:none}
+.fuel{display:inline-block;width:76px;height:8px;border-radius:4px;background:#1e293b;overflow:hidden;vertical-align:middle;margin-left:6px}
+#fuelF{display:block;height:100%;width:100%;background:linear-gradient(90deg,#f97316,#fde047)}
+#chipFuel.on{border-color:#fb923c;box-shadow:0 0 14px #fb923c}
+#bonus.pop{animation:pop .45s}@keyframes pop{40%{transform:scale(1.45)}}
+.hb{pointer-events:auto;margin-top:3px}
+#hint{position:absolute;left:50%;bottom:26px;transform:translateX(-50%);width:min(340px,92%);text-align:center;background:rgba(15,8,35,.88);border:1px solid rgba(168,85,247,.55);border-radius:16px;padding:10px 14px;font-size:14px;line-height:1.4;display:none;box-shadow:0 0 24px rgba(124,58,237,.35)}
+#hint b{color:#fde047}
+#hand{position:absolute;left:50%;top:58%;font-size:52px;display:none;animation:drag 2.2s ease-in-out infinite;filter:drop-shadow(0 0 8px #000)}
+@keyframes drag{0%{transform:translate(-30%,0);opacity:0}15%{opacity:1}65%{transform:translate(-90%,95px)}80%{transform:translate(-90%,95px);opacity:1}100%{opacity:0;transform:translate(-90%,95px)}}
+.stars{font-size:46px;letter-spacing:6px;margin:6px 0;color:#fde047;text-shadow:0 0 18px #f59e0b}
+.stars .e{color:#334155;text-shadow:none}
+.rows{margin:10px 0 14px;font-size:14px;text-align:left}
+.rows div{display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px dashed rgba(148,130,255,.2)}
+.big{font-size:30px;font-weight:900;color:#fff;text-shadow:0 0 14px #a855f7}
+.small{font-size:12px;color:#a5b4fc}
+</style></head><body>
+<canvas id="c"></canvas>
+<div id="ui">
+ <div id="menu" class="scr on"><h1>BLACKHOLE<br>BATTLE</h1><div class="sub">гравітаційна головоломка</div>
+  <button class="btn" id="bPlay">Грати</button><button class="btn g" id="bSectors">Сектори</button>
+  <div class="small" id="totalStars" style="margin-top:16px"></div></div>
+ <div id="sectors" class="scr dim"><h2 style="margin-bottom:12px">Сектори</h2><div id="secList"></div><button class="btn g s" id="bBack1">← Назад</button></div>
+ <div id="levels" class="scr dim"><h2 id="secTitle">Сектор</h2><div class="grid" id="grid"></div><button class="btn g s" id="bBack2">← Сектори</button></div>
+ <div id="hud">
+  <div class="col"><div class="chip" id="hLevel">1</div><div class="chip">⏱ <span id="hTime">0.0</span>с <span class="small" id="hTarget"></span></div>
+   <div class="chip" id="chipFuel">гальмо<span class="fuel"><span id="fuelF"></span></span></div></div>
+  <div class="col r"><div class="chip pips" id="hL">запуски</div><div class="chip" id="bonus">★ <b id="hB">0</b>/3</div>
+   <div><button class="btn s hb" id="bRestart">↻</button> <button class="btn g s hb" id="bMenu">☰</button></div></div>
+ </div>
+ <div id="hint"></div><div id="hand">👆</div>
+ <div id="result" class="scr dim"><div class="panel"><h2 id="rTitle">Портал!</h2><div class="stars" id="rStars"></div>
+  <div class="rows" id="rRows"></div><div class="small">Рахунок</div><div class="big" id="rScore">0</div><div class="small" id="rBest"></div>
+  <div style="margin-top:12px"><button class="btn" id="bNext">Далі →</button><br><button class="btn g s" id="bRetry">↻ Ще раз</button> <button class="btn g s" id="bLv">Рівні</button></div></div></div>
+ <div id="fail" class="scr dim"><div class="panel"><h2>Ой!</h2><p id="fText" style="margin:10px 0 16px;color:#c4b5fd"></p>
+  <button class="btn" id="bRetry2">↻ Заново</button><br><button class="btn g s" id="bLv2">Рівні</button></div></div>
+</div>
+<script src="sim.js"></script><script src="levels-src.js"></script><script src="levels.js"></script><script src="game.js"></script>
+<script>
+document.addEventListener('gesturestart',e=>e.preventDefault());
+document.addEventListener('touchmove',e=>e.preventDefault(),{passive:false});
+document.addEventListener('dblclick',e=>e.preventDefault());
+if('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(()=>{});
+</script>
+</body></html>
