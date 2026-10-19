@@ -1,4 +1,4 @@
-/* Blackhole Battle v3.1.2 — stage 2: visuals, sound, progress (gameplay/physics unchanged from v3.0) */
+/* Blackhole Battle v3.1.3 — stage 2: visuals, sound, progress (gameplay/physics unchanged from v3.0) */
 (() => {
 'use strict';
 const S = window.BHSim;
@@ -24,7 +24,7 @@ const KEY = 'bh_v3';
 let save; try { save = JSON.parse(localStorage.getItem(KEY)) || null; } catch (e) { save = null; }
 save = Object.assign({ unlocked: 1, best: {}, tut: {}, pu: { extra: 0, scan: 0, shield: 0, slow: 0 }, streak: 0, ach: {}, set: {} }, save || {});
 save.set = Object.assign({ vib: true, snd: true, sfx: 80, mus: 60, q: 'auto', facts: 'win' }, save.set || {}); PR.ensure(save);
-save.facts = save.facts || {}; I18N.set(save.set.lang); const FACTS = window.BH_FACTS || {}; const lvName = i => I18N.lvName(LID(i), LEVELS[i].n);
+save.facts = save.facts || {}; save.lfail = save.lfail || {}; save.hintOk = save.hintOk || {}; /* per-level failures + earned 'ideal path' hints */ I18N.set(save.set.lang); const FACTS = window.BH_FACTS || {}; const lvName = i => I18N.lvName(LID(i), LEVELS[i].n);
 const isOpen = i => CAT.levelOpen(save, i), bestOf = i => save.best[LID(i)];
 const persist = () => { try { localStorage.setItem(KEY, JSON.stringify(save)); } catch (e) {} };
 if (CAT.migrate(save)) persist();
@@ -139,17 +139,18 @@ function drawBG(t) {
 
 // ---------- state ----------
 let state = 'menu', li = 0, L = null, ship = null, launchesLeft = 0, collected = new Set(), clock = 0, started = false;
+const HINT_EVERY = 10, HINT_MS = 5200; let hintPath = null; // ideal-path star-dust playback
 let braking = false, trail = [], attempt = [], ghost = null, parts = [], pops = [], shake = 0, aim = null, preview = [], tf = 1, animT = 0, curSector = 0, thrust = 0;
-let active = {}, scanArmed = false, shieldOn = false, slowT = 0, heartT = 0, press = null, aimId = null, launchT = -1e9, flySteps = 0, lastTick = 0, ghostLevel = -1;
+let active = {}, scanArmed = false, shieldOn = false, slowT = 0, heartT = 0, press = null, aimId = null, launchT = -1e9, flySteps = 0, trap = null, trapT = 0, trapHint = false, failTok = 0, lastTick = 0, ghostLevel = -1;
 
 function startLevel(i, keepGhost) {
   if (!keepGhost || ghostLevel !== i) { ghost = null; }
-  li = i; ensureBG(SECTORS[CAT.secOf[i]].pal); L = S.prep(LEVELS[i]); ship = S.newShip(L); ship.ang = -Math.PI / 2;
+  hintPath = null; li = i; ensureBG(SECTORS[CAT.secOf[i]].pal); L = S.prep(LEVELS[i]); ship = S.newShip(L); ship.ang = -Math.PI / 2;
   launchesLeft = L.L; collected = new Set(); clock = 0; started = false; resetInput();
   trail = []; attempt = []; parts = []; pops = []; aim = null; preview = []; tf = 1; active = {}; scanArmed = false; shieldOn = false; slowT = 0;
   planetCache = {}; camWY = clampCam(ship.y); Z = 1; camCX = 180; camCY = camWY + 320; fl = { bounces: 0, margin: 1e9 }; AU.aimEnd(); state = 'aim'; show(null); $('hud').style.display = 'flex'; $('hTime').textContent = '0.0';
   $('hLevel').textContent = `${i + 1}. ${lvName(i)}`; $('hTarget').textContent = L.t3 ? `3★ ≤ ${L.t3}${T('hud.sec')}` : '';
-  $('chipFuel').style.display = L.stops ? '' : 'none';
+  $('chipFuel').style.display = L.stops ? '' : 'none'; syncHintBtn();
   hud(); buildPU(); requestAnimationFrame(placeAch);
   const h = $('hint'); h.innerHTML = '💡 ' + I18N.lvHint(LID(i), L.hint); h.style.display = 'block';
   $('hand').style.display = (i === 0 && !save.tut.aim) ? 'block' : 'none';
@@ -203,7 +204,7 @@ function aimVec() { const dx = aim.sx - aim.x, dy = aim.sy - aim.y, d = Math.hyp
   return { a: Math.atan2(dy, dx), p: pull, pct: Math.round(pull / S.MAX_PULL * 100) }; }
 function launch(a, p) {
   const sp = S.launchSpeed(p); ship.vx = Math.cos(a) * sp; ship.vy = Math.sin(a) * sp;
-  resetInput(); launchT = performance.now(); flySteps = 0;
+  resetInput(); launchT = performance.now(); flySteps = 0; hintPath = null; $('bHintPath').style.display = 'none'; trap = S.trapNew(ship, L); trapT = 0; setTrapHint(false);
   launchesLeft--; started = true; state = 'fly'; aim = null; thrust = 0.35; ship.scan = scanArmed; preview = []; scanArmed = false;
   if (active.slow && !active.slowUsed) { slowT = 3; active.slowUsed = 1; }
   for (let i = 0; i < 18; i++) spark(ship.x, ship.y, '#22d3ee', 60 + Math.random() * 90, a + Math.PI + (Math.random() - .5) * 1.2);
@@ -285,14 +286,63 @@ function tick() {
     if (shieldOn) { shieldOn = false; deflect(st); hud(); return; }
     return fail(['swallowed', 'moon', 'flare', 'oob'].includes(st) ? T('fail.' + st) : T('fail.generic'), st);
   }
+  // orbit trap / no-progress: >2 turns around one attractor without nearing the portal, or a per-launch hard cap
+  const capped = flySteps * S.STEP > (L.H > 700 ? 32 : 20);
+  if (trap && (S.trapStep(trap, ship, L) || capped)) {
+    const canBrake = L.stops > 0 && ship.fuel > 0 && launchesLeft > 0;
+    if (!(braking && ship.fuel > 0)) trapT += S.STEP; // the countdown pauses while the player is braking
+    setTrapHint(true, canBrake);
+    if (trapT >= S.TRAP_SECS) { setTrapHint(false); return fail(T('fail.trap'), 'trap'); }
+  } else if (trapT) { trapT = 0; setTrapHint(false); }
   if (braking && flySteps > 18 && Math.hypot(ship.vx, ship.vy) < S.STOP_SPEED) {
-    ship.vx = 0; ship.vy = 0; braking = false; burst(ship.x, ship.y, '#fb923c', 14); HAP.stop(); AU.stop();
-    if (launchesLeft > 0) { press = null; braking = false; aim = null; aimId = null; state = 'aim'; const h = $('hint'); h.innerHTML = T('ev.stop', { n: launchesLeft }); h.style.display = 'block'; }
+    ship.vx = 0; ship.vy = 0; braking = false; trapT = 0; setTrapHint(false); burst(ship.x, ship.y, '#fb923c', 14); HAP.stop(); AU.stop();
+    if (launchesLeft > 0) { press = null; braking = false; aim = null; aimId = null; state = 'aim'; syncHintBtn(); const h = $('hint'); h.innerHTML = T('ev.stop', { n: launchesLeft }); h.style.display = 'block'; }
     else fail(T('fail.stranded'), 'stranded');
     hud();
   }
   if (braking && ship.fuel <= 0) braking = false;
 }
+// ---------- ideal-path hint: replay the stored solver solution in the pure sim and show it once as star-dust ----------
+function solverPath(i) {
+  const L0 = S.prep(LEVELS[i]), sol = LEVELS[i].sol; if (!sol) return null; const o = S.newShip(L0), pts = [], marks = []; let steps = 0;
+  for (let k = 0; k < sol.length; k++) { const st = sol[k], sp = S.launchSpeed(st.p); o.vx = Math.cos(st.a) * sp; o.vy = Math.sin(st.a) * sp;
+    marks.push({ t: 'launch', n: k + 1, x: o.x, y: o.y, at: pts.length }); let done = false;
+    for (let j = 0; j < 2600; j++) { if (st.tg != null && j === st.tg) { o.flip = -o.flip; marks.push({ t: 'tap', x: o.x, y: o.y, at: pts.length }); }
+      const br = st.b != null && j >= st.b && o.fuel > 0; if (br && j === st.b) marks.push({ t: 'brake', x: o.x, y: o.y, at: pts.length });
+      const wx = o.x, wy = o.y; S.step(o, L0, { brake: br }); steps++; if (Math.hypot(o.x - wx, o.y - wy) > 60) pts.push(null); // wormhole jump
+      if (j % 2 === 0) pts.push([o.x, o.y]); const r = S.status(o, L0); if (r) { done = true; break; }
+      if (br && Math.hypot(o.vx, o.vy) < S.STOP_SPEED) { o.vx = 0; o.vy = 0; marks.push({ t: 'stop', x: o.x, y: o.y, at: pts.length }); break; } }
+    if (done) break; }
+  return { pts, marks };
+}
+function syncHintBtn() { $('bHintPath').style.display = L && save.hintOk[LID(li)] && state === 'aim' && !hintPath ? '' : 'none'; }
+function useHintPath() {
+  if (state !== 'aim' || !save.hintOk[LID(li)]) return; const P = solverPath(li); if (!P) return;
+  delete save.hintOk[LID(li)]; save.lfail[LID(li)] = 0; persist(); // counter resets after use; shown once
+  hintPath = Object.assign(P, { t0: performance.now(), head: null, dust: [] }); toast(T('hp.watch'), 1600); AU.star(3); HAP.tick(); syncHintBtn();
+}
+function drawHintPath() {
+  if (!hintPath) return; const e = performance.now() - hintPath.t0; if (e > HINT_MS) { hintPath = null; syncHintBtn(); return; }
+  const P = hintPath, n = P.pts.length, reveal = Math.min(1, e / (HINT_MS * 0.6)), upto = Math.floor(n * reveal), fade = e > HINT_MS * 0.72 ? 1 - (e - HINT_MS * 0.72) / (HINT_MS * 0.28) : 1;
+  const pc = ctx.globalCompositeOperation; ctx.globalCompositeOperation = 'lighter';
+  for (let k = 0; k < upto; k++) { const p = P.pts[k]; if (!p) continue; const age = (upto - k) / n, tw = .55 + .45 * Math.sin(animT * 9 + k * 1.7);
+    const a = fade * Math.max(.18, 1 - age * 1.4) * tw; ctx.fillStyle = `rgba(253,230,138,${a.toFixed(3)})`; const rr = R(1.3 + 1.5 * tw);
+    ctx.beginPath(); ctx.arc(X(p[0]) + Math.sin(k * 12.9) * R(2), Y(p[1]) + Math.cos(k * 7.3) * R(2), rr, 0, 7); ctx.fill();
+    if (k % 14 === 0) { ctx.fillStyle = `rgba(255,255,255,${(a * .9).toFixed(3)})`; const x = X(p[0]), y = Y(p[1]), s2 = R(3.5 * tw); ctx.fillRect(x - s2, y - .6, s2 * 2, 1.2); ctx.fillRect(x - .6, y - s2, 1.2, s2 * 2); } }
+  let hp = null; for (let k = Math.min(upto, n - 1); k >= 0 && !hp; k--) hp = P.pts[k]; P.head = hp;
+  if (hp && reveal < 1) { const g = ctx.createRadialGradient(X(hp[0]), Y(hp[1]), 0, X(hp[0]), Y(hp[1]), R(14)); g.addColorStop(0, `rgba(255,250,220,${fade})`); g.addColorStop(1, 'rgba(253,224,71,0)'); ctx.fillStyle = g; ctx.beginPath(); ctx.arc(X(hp[0]), Y(hp[1]), R(14), 0, 7); ctx.fill(); }
+  ctx.globalCompositeOperation = pc;
+  for (const m of P.marks) { if (m.at > upto) continue; const x = X(m.x), y = Y(m.y), pul = 1 + .15 * Math.sin(animT * 6);
+    const col = m.t === 'brake' ? '251,146,60' : m.t === 'stop' ? '34,211,238' : m.t === 'tap' ? '96,165,250' : '253,224,71';
+    ctx.strokeStyle = `rgba(${col},${(.9 * fade).toFixed(3)})`; ctx.lineWidth = R(2); ctx.setLineDash(m.t === 'brake' ? [R(3), R(3)] : []); ctx.beginPath(); ctx.arc(x, y, R(m.t === 'launch' ? 13 : 10) * pul, 0, 7); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle = `rgba(${col},${fade.toFixed(3)})`; ctx.font = `bold ${R(10)}px sans-serif`; ctx.textAlign = 'center';
+    const lab = m.t === 'launch' ? (m.n > 1 ? T('hp.relaunch', { n: m.n }) : P.marks.some(q => q.t === 'stop') ? T('hp.launchN', { n: 1 }) : '') : m.t === 'brake' ? T('hp.brake') : m.t === 'tap' ? T('hp.tap') : '';
+    if (lab) ctx.fillText(lab, x, y - R(16)); ctx.textAlign = 'left'; }
+}
+function setTrapHint(on, canBrake) { const h = $('hint');
+  if (!on) { if (trapHint) { trapHint = false; h.classList.remove('pulse'); if (state === 'fly') h.style.display = 'none'; } return; }
+  const txt = T(canBrake ? 'trap.brake' : 'trap.lost'); if (trapHint === txt) return;
+  trapHint = txt; h.innerHTML = txt; h.style.display = 'block'; h.classList.add('pulse'); }
 function deflect(st) {
   toast(T('ev.shield'), 1100); shake = 12; burst(ship.x, ship.y, '#67e8f9', 40); HAP.bounce(); AU.shield(); save.stats.shields++; achCheck();
   let nx = -ship.vx, ny = -ship.vy;
@@ -341,11 +391,19 @@ function grant(why) {
   const keys = Object.keys(PU); const k = keys[(save.streak + Object.keys(save.ach).length + li) % keys.length]; save.pu[k]++;
   return T('grant.got', { w: why, i: PU[k].i, n: PU[k].n });
 }
+const AR_MS = 2000; // auto-restart after a loss
+function arStart(tok) { const c = $('arC'); c.style.transition = 'none'; c.style.strokeDashoffset = '0'; void c.getBoundingClientRect();
+  c.style.transition = `stroke-dashoffset ${AR_MS}ms linear`; c.style.strokeDashoffset = '113.1'; $('arWrap').classList.add('on');
+  setTimeout(() => { if (state === 'fail' && tok === failTok) arRestart(); }, AR_MS); }
+function arRestart() { if (state !== 'fail') return; failTok++; $('arWrap').classList.remove('on'); startLevel(li, true); }
 function fail(msg, why) {
   resetInput(); state = 'fail'; burst(ship.x, ship.y, '#ef4444', 40); shake = 14; HAP.death(); AU.lose();
   save.stats.fails++; save.stats.deaths[why || 'other'] = (save.stats.deaths[why || 'other'] || 0) + 1; achCheck({ type: 'fail' }); persist(); $('hud').style.display = 'none'; $('hint').style.display = 'none';
   ghost = attempt.slice(); ghostLevel = li;
-  $('fText').textContent = msg; setTimeout(() => { if (state === 'fail') show('fail'); }, 500);
+  { const id = LID(li); save.lfail[id] = (save.lfail[id] || 0) + 1; let earned = false; if (save.lfail[id] >= HINT_EVERY && !save.hintOk[id] && LEVELS[li].sol) { save.hintOk[id] = 1; earned = true; } persist();
+    $('fHint').innerHTML = earned ? T('hp.earned') : save.hintOk[id] ? T('hp.ready') : save.lfail[id] >= 3 && LEVELS[li].sol ? T('hp.progress', { n: HINT_EVERY - save.lfail[id] }) : ''; $('fHint').classList.toggle('new', earned); }
+  $('fText').textContent = msg; const tok = ++failTok; setTrapHint(false);
+  setTimeout(() => { if (state !== 'fail' || tok !== failTok) return; show('fail'); arStart(tok); }, 500);
 }
 
 // ---------- drawing ----------
@@ -634,7 +692,7 @@ function frame(now) {
   if (aim && state === 'aim') { aimSmooth(dt); if (scanArmed && aim.ang != null) { const v = aimVec(); if (v.p > 3 && (Math.abs(wrapA(v.a - (aim.pa ?? 99))) > 0.002 || Math.abs(v.p - (aim.pp ?? -1)) > 0.5)) { aim.pa = v.a; aim.pp = v.p; preview = computePreview(v.a, v.p); } } }
   if (L && started && state === 'aim') clock += dt;
   if (L && started) $('hTime').textContent = clock.toFixed(1);
-  if (L && ship) { const tgt = clampCam(ship.y); camWY += (tgt - camWY) * Math.min(1, dt * 4); parX += (((ship.x - 180) / 180) - parX) * .05; }
+  if (L && ship) { const tgt = clampCam(hintPath && hintPath.head ? hintPath.head[1] : ship.y); camWY += (tgt - camWY) * Math.min(1, dt * 4); parX += (((ship.x - 180) / 180) - parX) * .05; }
   shake *= Math.pow(0.02, dt);
   // camera: smooth follow + slight zoom on close passes
   [cpK, proxK] = holeK(); const cp = state === 'fly' ? cpK : 0;
@@ -665,7 +723,7 @@ function frame(now) {
     L.planets.forEach(drawPlanet); L.asteroids.forEach(drawAsteroid); L.gates.forEach(g => drawGate(g, animT)); L.worms.forEach((w, i) => drawWorm(w, animT, i));
     L.moons.forEach(m => drawMoon(m, t)); L.holes.forEach(h => drawHoleTop(h, t));
     drawPortal(animT); L.keys.forEach((k, i) => drawKey(k, i, animT)); L.stars.forEach((s, k) => drawStar(s, k, animT));
-    drawGhost(); drawTrail(); drawAim(); if (state !== 'fail') drawShuttle(); if (state === 'aim' && aim && aim.ang != null) drawBeam(aimVec()); drawFX(dt); if (!useGL) drawSlowmo();
+    drawGhost(); drawHintPath(); drawTrail(); drawAim(); if (state !== 'fail') drawShuttle(); if (state === 'aim' && aim && aim.ang != null) drawBeam(aimVec()); drawFX(dt); if (!useGL) drawSlowmo();
   } else {
     drawHoleTop(MENU_HOLE, animT);
     if (!ship) ship = { x: 0, y: 0, vx: 0, vy: 0, t: 0, broken: 0, keys: 0, flip: 1 };
@@ -720,16 +778,20 @@ function syncSettings() { $('tVib').classList.toggle('on', save.set.vib); $('tSn
   $('qInfo').textContent = T('q.now', { q: QN[qLevel], r: T(useGL ? 'q.gl' : 'q.cv') }); AU.configure(save.set); }
 // ---------- achievements / stats ----------
 let achQ = [], achBusy = false;
-function achCheck(ev) { const got = PR.check(save, ev); if (got.length) { persist(); achQ.push(...got); if (!achBusy) achNext(); } }
+function achCheck(ev) { ev = Object.assign({ type: 'event' }, ev || {}); if (L && li != null && LID(li)) ev.lv = LID(li); const got = PR.check(save, ev); if (got.length) { persist(); achQ.push(...got); if (!achBusy) achNext(); } }
 function placeAch() { const e = $('achT'); const inGame = !!L && (state === 'aim' || state === 'fly'); e.classList.toggle('side', inGame); // small side toast below the HUD columns during play
   if (inGame) { let y = 0; $('hud').querySelectorAll('.col').forEach(c => y = Math.max(y, c.getBoundingClientRect().bottom)); e.style.top = Math.round(y + 8) + 'px'; } else e.style.top = '14px'; }
-function achNext() { const a = achQ.shift(); if (!a) { achBusy = false; return; } achBusy = true; const e = $('achT'); placeAch(); e.innerHTML = `<span class="ai">${a.i}</span><div><small>${T('ach.unlocked')}</small><b>${a.n}</b></div>`; e.classList.add('on'); AU.ach(); HAP.star();
-  setTimeout(() => { e.classList.remove('on'); setTimeout(achNext, 380); }, 2300); }
+function achNext() { const a = achQ.shift(); if (!a) { achBusy = false; return; } achBusy = true; const e = $('achT'); placeAch(); e.innerHTML = `<span class="ai">${a.i}</span><div><small>${T('ach.unlocked')}</small><b>${a.n}</b><i class="ad">${a.d}</i></div>`; e.classList.add('on'); AU.ach(); HAP.star();
+  setTimeout(() => { e.classList.remove('on'); setTimeout(achNext, 380); }, 3200); }
 function buildAch() { const n = Object.keys(save.achv).length; $('achCount').textContent = `${n} / ${PR.ACH.length}`;
-  $('achList').innerHTML = PR.ACH.map(a => { const t = save.achv[a.id]; return `<div class="ach${t ? ' got' : ''}"><span class="ai">${t ? a.i : '🔒'}</span><div><b>${a.n}</b><small>${a.d}</small>${t ? `<em>${new Date(t).toLocaleDateString(I18N.lang === 'uk' ? 'uk-UA' : I18N.lang === 'es' ? 'es-ES' : 'en-GB')}</em>` : ''}</div></div>`; }).join(''); }
+  const loc = I18N.lang === 'uk' ? 'uk-UA' : I18N.lang === 'es' ? 'es-ES' : 'en-GB';
+  $('achList').innerHTML = PR.ACH.map(a => { const t = save.achv[a.id], pr = PR.progress(save, a), at = (save.achvAt || {})[a.id], ix = at != null ? CAT.index[at] : null;
+    const bar = pr && pr.g > 1 ? `<span class="ap"><span class="apb"><i style="width:${Math.round(pr.c / pr.g * 100)}%"></i></span>${T('ach.progress', { c: pr.c, g: pr.g })}</span>` : '';
+    const when = t ? `<em>${T('ach.earned', { d: new Date(t).toLocaleDateString(loc) })}${ix != null ? ' ' + T('ach.where', { n: ix + 1, l: lvName(ix) }) : ''}</em>` : (bar ? '' : `<em class="lk">${T('ach.locked')}</em>`);
+    return `<div class="ach${t ? ' got' : ''}"><span class="ai">${t ? a.i : '🔒'}</span><div><b>${a.n}</b><small>${a.d}</small>${t ? '' : bar}${when}</div></div>`; }).join(''); }
 const fmtT = s => { s = Math.round(s); const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), ss = s % 60; return h ? T('t.h', { h, m }) : m ? T('t.m', { m, s: ss }) : T('t.s', { s: ss }); };
 function buildStats() { const st = save.stats, stn = PR.stars(save), rk = PR.rank(stn), done = LEVELS.filter((_, i) => bestOf(i)).length;
-  const D = {}; for (const k of ['swallowed', 'moon', 'flare', 'oob', 'stranded']) D[k] = T('d.' + k);
+  const D = {}; for (const k of ['swallowed', 'moon', 'flare', 'oob', 'stranded', 'trap']) D[k] = T('d.' + k);
   const rows = [[T('st.rank'), rk.name], [T('st.stars'), `${stn} / ${CAT.maxStars}`], [T('st.score'), I18N.num(PR.score(save))], [T('st.done'), `${done} / ${LEVELS.length}`], [T('st.facts'), `${Object.keys(save.facts).length} / ${CAT.idOf.filter(id => FACTS[id]).length}`], [T('st.launches'), st.launches], [T('st.flight'), fmtT(st.flight)], [T('st.play'), fmtT(st.play)],
     [T('st.wl'), `${st.wins} / ${st.fails}`], ...Object.keys(D).filter(k => st.deaths[k]).map(k => ['  · ' + D[k], st.deaths[k]]), [T('st.bonus'), st.bonus], [T('st.bounces'), st.bounces], [T('st.worms'), st.worms], [T('st.flips'), st.flips], [T('st.pu'), st.puUsed], [T('st.dilate'), fmtT(st.dilate)]];
   let h = '<div class="rows">' + rows.map(r => `<div><span>${r[0]}</span><b>${r[1]}</b></div>`).join('') + `</div><h3>${T('st.records')}</h3><div class="rows lvb">`;
@@ -760,12 +822,14 @@ $('tSnd').onclick = () => { save.set.snd = !save.set.snd; persist(); syncSetting
 $('rSfx').oninput = e => { save.set.sfx = +e.target.value; persist(); AU.configure(save.set); }; $('rSfx').onchange = () => AU.star(2);
 $('rMus').oninput = e => { save.set.mus = +e.target.value; persist(); AU.configure(save.set); };
 $('bSetBack').onclick = toMenu; $('bBack1').onclick = toMenu; $('bBack2').onclick = () => { buildSectors(); show('sectors'); };
-$('bRestart').onclick = () => { if (started) { ghost = attempt.slice(); ghostLevel = li; } startLevel(li, true); }; $('bMenu').onclick = toMenu;
-$('bNext').onclick = () => startLevel(li + 1); $('bRetry').onclick = () => startLevel(li); $('bRetry2').onclick = () => startLevel(li, true);
-$('bLv').onclick = $('bLv2').onclick = () => { curSector = CAT.secOf[li]; buildLevels(); show('levels'); };
+$('bRestart').onclick = () => { if (started) { ghost = attempt.slice(); ghostLevel = li; } startLevel(li, true); }; $('bMenu').onclick = toMenu; $('bHintPath').onclick = e => { e.stopPropagation(); useHintPath(); };
+$('bNext').onclick = () => startLevel(li + 1); $('bRetry').onclick = () => startLevel(li); $('bRetry2').onclick = e => { e.stopPropagation(); arRestart(); };
+$('fail').onclick = e => { if (e.target.closest('#bLv2,#bFailMenu')) return; arRestart(); }; // tap anywhere = restart now
+$('bFailMenu').onclick = () => { failTok++; toMenu(); };
+$('bLv').onclick = $('bLv2').onclick = () => { failTok++; curSector = CAT.secOf[li]; buildLevels(); show('levels'); };
 AU.configure(save.set); applyLang(); toMenu();
 window.BH = { LEVELS, startLevel, launch: (a, p) => launch(a, p), get state() { return state; }, get ship() { return ship; }, get clock() { return clock; }, toMenu, save, persist,
   advance(n, brake, tg) { braking = !!brake && ship.fuel > 0; for (let i = 0; i < n && state === 'fly'; i++) { if (tg != null && i === tg) ship.flip = -ship.flip; tick(); } braking = false; },
   runPlanStep(st) { launch(st.a, st.p); for (let i = 0; i < 2600 && state === 'fly'; i++) { if (st.tg != null && i === st.tg) ship.flip = -ship.flip; braking = st.b != null && i >= st.b && ship.fuel > 0; tick(); } braking = false; },
-  show, buildSectors, syncSettings, buildAch, buildStats, achCheck, get gl() { return useGL; }, get quality() { return qLevel; }, get zoom() { return Z; }, CAT, levelId: LID, unlockAll() { LEVELS.forEach((_, i) => save.open[LID(i)] = 1); persist(); }, get braking() { return braking; }, get pressing() { return !!press; }, toScreen(x, y) { return [X(x), Y(y)]; }, stepN(n) { for (let i = 0; i < n && state === 'fly'; i++) tick(); }, freeze(b) { frozen = !!b; }, forceWin() { if (state === 'aim' || state === 'fly') { clock = clock || 2.5; win(); } }, buildCodex, get facts() { return save.facts; }, setShip(x, y, vx, vy) { ship.x = x; ship.y = y; ship.vx = vx; ship.vy = vy; } };
+  show, buildSectors, syncSettings, buildAch, buildStats, achCheck, get gl() { return useGL; }, get quality() { return qLevel; }, get zoom() { return Z; }, CAT, levelId: LID, unlockAll() { LEVELS.forEach((_, i) => save.open[LID(i)] = 1); persist(); }, get braking() { return braking; }, get pressing() { return !!press; }, toScreen(x, y) { return [X(x), Y(y)]; }, stepN(n) { for (let i = 0; i < n && state === 'fly'; i++) tick(); }, freeze(b) { frozen = !!b; }, forceWin() { if (state === 'aim' || state === 'fly') { clock = clock || 2.5; win(); } }, buildCodex, get facts() { return save.facts; }, get trapT() { return trapT; }, get trapHint() { return trapHint; }, get failTok() { return failTok; }, get hintPath() { return hintPath; }, useHintPath, solverPath, setShip(x, y, vx, vy) { ship.x = x; ship.y = y; ship.vx = vx; ship.vy = vy; } };
 })();

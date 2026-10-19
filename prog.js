@@ -34,11 +34,18 @@ window.BHProg = (() => {
     { id: 'scholar', i: '📖', n: 'Науковець', d: 'Відкрий 25 фактів у Кодексі', t: s => Object.keys(s.facts || {}).length >= 25 },
   ];
   for (const a of ACH) if (!a.id.startsWith('sec') || a.id === 'sector30') { const n0 = a.n, d0 = a.d; Object.defineProperty(a, 'n', { get: () => window.I18N ? T('a.' + a.id + '.n') : n0 }); Object.defineProperty(a, 'd', { get: () => window.I18N ? T('a.' + a.id + '.d') : d0 }); }
+  const maxSec = s => cat ? Math.max(0, ...cat.real.map((S, k) => secStars(s, k))) : 0;
+  const PROG = { first: s => [s.stats.wins, 1], perfect: s => [Object.values(s.best).filter(b => b.s === 3).length, 1], sector30: s => [maxSec(s), 30],
+    streak: s => [s.streak % 4 === 0 && s.streak ? 4 : s.streak % 4, 4], worm: s => [s.stats.worms, 1], polar: s => [s.stats.flips, 15], breaker: s => [s.stats.breaks, 1],
+    saved: s => [s.stats.shields, 1], tech: s => [s.stats.puUsed, 5], veteran: s => [s.stats.launches, 100], fearless: s => [s.stats.fails, 25],
+    dilation: s => [Math.floor(s.stats.dilate), 20], half: s => [stars(s), 75], master: s => [stars(s), 150], scholar: s => [Object.keys(s.facts || {}).length, 25] };
+  for (let k = 1; k <= 5; k++) PROG['sec' + k] = s => [bossBeaten(s, k - 1) ? 1 : 0, 1];
+  function progress(s, a) { const f = PROG[a.id]; if (!f) return null; try { const [c, g] = f(s); return { c: Math.min(c, g), g }; } catch (e) { return null; } }
   function ensure(s) {
-    s.achv = s.achv || {};
+    s.achv = s.achv || {}; s.achvAt = s.achvAt || {}; // achvAt[id] = level id where it was earned
     s.stats = Object.assign({ launches: 0, flight: 0, play: 0, wins: 0, fails: 0, deaths: {}, bonus: 0, bounces: 0, worms: 0, flips: 0, breaks: 0, puUsed: 0, shields: 0, dilate: 0, restarts: 0 }, s.stats || {});
     return s;
   }
-  function check(s, ev) { const out = []; for (const a of ACH) if (!s.achv[a.id]) { let ok = false; try { ok = a.t(s, ev || { type: 'event' }); } catch (e) {} if (ok) { s.achv[a.id] = Date.now(); out.push(a); } } return out; }
-  return { RANKS, ACH, rank, stars, score, secStars, ensure, check, setCatalog(c) { cat = c; } };
+  function check(s, ev) { const out = []; for (const a of ACH) if (!s.achv[a.id]) { let ok = false; try { ok = a.t(s, ev || { type: 'event' }); } catch (e) {} if (ok) { s.achv[a.id] = Date.now(); if (ev && ev.lv) s.achvAt[a.id] = ev.lv; out.push(a); } } return out; }
+  return { RANKS, ACH, progress, rank, stars, score, secStars, ensure, check, setCatalog(c) { cat = c; } };
 })();

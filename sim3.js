@@ -96,5 +96,25 @@
     if (Math.hypot(o.x - L.portal[0], o.y - L.portal[1]) < L.pr) return 'win';
     return null;
   }
-  root.BHSim = { G, SOFT, STEP, STOP_SPEED, MAX_PULL, KILL, launchSpeed, fuelFor, prep, newShip, holePos, holeMass, moonPos, flareOn, dilation, accel, step, status, hitRect };
+
+  // Orbit-trap detector (v3.1.3). Pure helper, never alters the simulation: true while the ship has swept more than
+  // TRAP_REV full turns around one attractor (hole / massive planet) without getting >25px closer to the portal,
+  // or no such progress at all for TRAP_NOPROG seconds (wide eccentric loops).
+  const TRAP_REV = 2, TRAP_SECS = 7, TRAP_NOPROG = 10;
+  function trapNew(o, L) { return { k: -1, last: 0, ang: 0, np: 0, best: Math.hypot(o.x - L.portal[0], o.y - L.portal[1]) }; }
+  function trapStep(tr, o, L) {
+    let k = -1, bx = 0, by = 0, bd = 1e9;
+    L.holes.forEach((h, i) => { const [x, y] = holePos(h, o.t), d = Math.hypot(o.x - x, o.y - y); if (d < bd) { bd = d; bx = x; by = y; k = i; } });
+    L.planets.forEach((p, i) => { if (!p[3]) return; const d = Math.hypot(o.x - p[0], o.y - p[1]); if (d < bd) { bd = d; bx = p[0]; by = p[1]; k = 100 + i; } });
+    const pd = Math.hypot(o.x - L.portal[0], o.y - L.portal[1]);
+    if (pd < tr.best - 25) { tr.best = pd; tr.ang = 0; tr.np = 0; } else tr.np++;
+    const stale = tr.np * STEP > TRAP_NOPROG; // no real progress toward the portal for 10 s
+    if (k < 0) return stale;
+    const a = Math.atan2(o.y - by, o.x - bx);
+    if (k !== tr.k) { tr.k = k; tr.ang = 0; tr.last = a; return stale; }
+    let da = a - tr.last; if (da > Math.PI) da -= 2 * Math.PI; else if (da < -Math.PI) da += 2 * Math.PI;
+    tr.last = a; tr.ang += da;
+    return stale || Math.abs(tr.ang) > TRAP_REV * 2 * Math.PI;
+  }
+  root.BHSim = { G, SOFT, STEP, STOP_SPEED, MAX_PULL, KILL, launchSpeed, fuelFor, prep, newShip, holePos, holeMass, moonPos, flareOn, dilation, accel, step, status, hitRect, TRAP_REV, TRAP_SECS, TRAP_NOPROG, trapNew, trapStep };
 })(typeof window !== 'undefined' ? window : globalThis);
