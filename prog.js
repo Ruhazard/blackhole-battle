@@ -5,15 +5,16 @@ window.BHProg = (() => {
   const SECN = ['Пояс Кеплера', 'Місяці Гіганта', 'Магнітар', 'Кротові нори', 'Горизонт подій'];
   const stars = s => Object.values(s.best).reduce((a, b) => a + (b.s || 0), 0);
   const score = s => Object.values(s.best).reduce((a, b) => a + (b.sc || 0), 0);
+  const T = (k, v) => window.I18N ? I18N.t(k, v) : k;
   let cat = null; // set by the game: level/sector catalog (id-keyed saves)
   const secStars = (s, k) => cat.real[k] ? cat.real[k].ids.reduce((n, id) => n + ((s.best[id] || {}).s || 0), 0) : 0;
   const bossBeaten = (s, k) => { const S = cat && cat.real[k]; return !!(S && s.best[S.ids[S.ids.length - 1]]); };
-  function rank(st) { let i = 0; while (i + 1 < RANKS.length && st >= RANKS[i + 1][0]) i++; const nx = RANKS[i + 1]; return { i, name: RANKS[i][1], at: RANKS[i][0], next: nx ? nx[1] : null, nextAt: nx ? nx[0] : null }; }
+  function rank(st) { let i = 0; while (i + 1 < RANKS.length && st >= RANKS[i + 1][0]) i++; const nx = RANKS[i + 1]; return { i, name: T('rank.' + i), at: RANKS[i][0], next: nx ? T('rank.' + (i + 1)) : null, nextAt: nx ? nx[0] : null }; }
   // ev: {type:'win'|'fail'|'event', ...}
   const ACH = [
     { id: 'first', i: '🚀', n: 'Перший старт', d: 'Пройди будь-який рівень', t: s => s.stats.wins >= 1 },
     { id: 'perfect', i: '⭐', n: 'Ідеальна траєкторія', d: 'Отримай ★★★ на рівні', t: s => Object.values(s.best).some(b => b.s === 3) },
-    ...SECN.map((n, k) => ({ id: 'sec' + (k + 1), i: ['🪐', '🌙', '🧲', '🌀', '🕳'][k], n: `Сектор ${k + 1}: ${n}`, d: `Переможи боса сектора ${k + 1}`, t: s => bossBeaten(s, k) })),
+    ...SECN.map((n0, k) => ({ id: 'sec' + (k + 1), i: ['🪐', '🌙', '🧲', '🌀', '🕳'][k], get n() { return T('a.sec.n', { k: k + 1, n: cat && cat.real[k] && window.I18N ? I18N.secName(cat.real[k]) : n0 }); }, get d() { return T('a.sec.d', { k: k + 1 }); }, t: s => bossBeaten(s, k) })),
     { id: 'sector30', i: '🌟', n: 'Зоряний сектор', d: 'Збери 30/30 ★ в одному секторі', t: s => cat.real.some((S, k) => secStars(s, k) >= S.ids.length * 3) },
     { id: 'collector', i: '💫', n: 'Збирач', d: 'Збери всі 3 бонусні зірки за один політ', t: (s, e) => e.type === 'win' && e.bonus >= 3 },
     { id: 'streak', i: '🔥', n: 'Серія', d: '4 рівні поспіль на ★★★', t: s => s.streak >= 4 },
@@ -30,7 +31,9 @@ window.BHProg = (() => {
     { id: 'dilation', i: '⏳', n: 'Час — гума', d: 'Проведи 20 с у сильному сповільненні часу', t: s => s.stats.dilate >= 20 },
     { id: 'half', i: '🌗', n: 'Половина неба', d: 'Збери 75 ★', t: s => stars(s) >= 75 },
     { id: 'master', i: '👑', n: 'Володар горизонту', d: 'Збери всі 150 ★', t: s => stars(s) >= 150 },
+    { id: 'scholar', i: '📖', n: 'Науковець', d: 'Відкрий 25 фактів у Кодексі', t: s => Object.keys(s.facts || {}).length >= 25 },
   ];
+  for (const a of ACH) if (!a.id.startsWith('sec') || a.id === 'sector30') { const n0 = a.n, d0 = a.d; Object.defineProperty(a, 'n', { get: () => window.I18N ? T('a.' + a.id + '.n') : n0 }); Object.defineProperty(a, 'd', { get: () => window.I18N ? T('a.' + a.id + '.d') : d0 }); }
   function ensure(s) {
     s.achv = s.achv || {};
     s.stats = Object.assign({ launches: 0, flight: 0, play: 0, wins: 0, fails: 0, deaths: {}, bonus: 0, bounces: 0, worms: 0, flips: 0, breaks: 0, puUsed: 0, shields: 0, dilate: 0, restarts: 0 }, s.stats || {});

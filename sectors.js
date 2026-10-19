@@ -35,7 +35,10 @@ window.BHCat = (() => {
       const u = s.unlock || {}; if (u.after) { const p = byId[u.after]; if (!p || !p.ids.length || !sv.best[p.ids[p.ids.length - 1]]) return false; }
       if (u.stars && stars(sv) < u.stars) return false; return true; }
     function levelOpen(sv, i) { const id = idOf[i]; if (!id) return false; if (sv.open[id] || sv.best[id]) return true; const s = sectors[secOf[i]]; return s.idx[0] === i && sectorOpen(sv, s.k); }
-    function lockText(s) { if (s.soon) return 'Скоро'; const u = s.unlock || {}; const t = []; if (u.after) t.push(`переможи боса «${byId[u.after].n}»`); if (u.stars) t.push(`збери ${u.stars} ★`); return t.length ? 'Щоб відкрити: ' + t.join(', ') : ''; }
+    function lockText(s) { const I = typeof window !== 'undefined' && window.I18N, T = (k, v, f) => I ? I.t(k, v) : f;
+             if (s.soon) return T('sec.soonText', null, 'Скоро'); const u = s.unlock || {}; const t = [];
+             if (u.after) { const p = byId[u.after]; const n = I ? I.secName(p) : p.n; t.push(T('sec.lockBoss', { n }, `переможи боса «${n}»`)); }
+             if (u.stars) t.push(T('sec.lockStars', { n: u.stars }, `збери ${u.stars} ★`)); return t.length ? T('sec.lock', { t: t.join(', ') }, 'Щоб відкрити: ' + t.join(', ')) : ''; }
     function migrate(sv) { // v1 (index-keyed) -> v2 (id-keyed)
       if (sv.v >= 2) { sv.open = sv.open || {}; return false; }
       const nb = {}; for (const k in sv.best || {}) { const id = /^\d+$/.test(k) ? idOf[+k] : k; if (id) nb[id] = sv.best[k]; } sv.best = nb;

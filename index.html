@@ -82,47 +82,85 @@ input[type=range]{width:140px;accent-color:#a855f7;pointer-events:auto}
 .ach.got{opacity:1;background:linear-gradient(150deg,rgba(253,224,71,.14),rgba(255,255,255,.03));border-color:rgba(253,224,71,.4)}.ach b{display:block;font-size:14px}.ach small{display:block;font-size:12px;color:#c4b5fd}.ach em{font-size:10px;color:#fde68a;font-style:normal}
 #statBody{width:100%;max-height:60vh;overflow-y:auto}#statBody h3{margin:12px 0 4px;font-size:14px;color:#fde047}.lvb div{font-size:12px}
 .ver{position:absolute;bottom:10px;right:12px;font-size:11px;color:rgba(196,181,253,.5)}
+
+.set.wrap{flex-wrap:wrap;gap:8px}.set.wrap .seg{width:100%}.set.wrap .seg button{flex:1;padding:7px 4px}
+.set>span{flex:1 1 auto;min-width:0;padding-right:8px}.seg{flex-shrink:0}.seg button{white-space:nowrap}
+#langSeg button{padding:7px 7px;font-size:12px}
+.btn{overflow-wrap:anywhere}.row2 .btn{white-space:normal;line-height:1.15}
+#achT.side{left:auto;right:8px;min-width:0;max-width:min(230px,62vw);padding:7px 11px;gap:8px;border-radius:14px;transform:translateX(130%)}
+#achT.side.on{transform:none}#achT.side b{font-size:13px}#achT.side small{font-size:9.5px}#achT.side .ai{font-size:20px}
+#factCard{background:rgba(3,2,12,.55)}
+.panel.fact{text-align:left;width:min(360px,94%);border-color:rgba(94,234,212,.45);box-shadow:0 20px 60px rgba(0,0,0,.5),0 0 40px rgba(45,212,191,.22),inset 0 1px 0 rgba(255,255,255,.18)}
+.flab{font-size:11px;letter-spacing:1.5px;text-transform:uppercase;color:#5eead4;margin-bottom:6px}
+.panel.fact h2{font-size:21px;line-height:1.2;margin:0 0 10px;text-align:left;overflow-wrap:anywhere}
+.panel.fact p{font-size:15.5px;line-height:1.45;color:#ede9fe;margin:0}
+.fstar{display:none;margin-top:12px;padding:8px 10px;border-radius:12px;font-size:13px;color:#fde68a;background:rgba(253,224,71,.1);border:1px solid rgba(253,224,71,.4)}
+.fstar.on{display:block}.fstar.dim{display:block;color:#a78bfa;background:rgba(255,255,255,.04);border-color:rgba(255,255,255,.12)}
+.fsrc{margin-top:12px;font-size:10.5px;color:#a5b4fc;opacity:.7}
+.ftap{margin-top:12px;text-align:center;opacity:.6}
+.cxh{font-size:12px;letter-spacing:1px;text-transform:uppercase;color:#c4b5fd;margin:14px 4px 4px;text-align:left}
+.cx{text-align:left;padding:10px 12px;margin:6px 0;border-radius:16px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08)}
+.cx.got{background:linear-gradient(150deg,rgba(45,212,191,.12),rgba(255,255,255,.03));border-color:rgba(94,234,212,.35);pointer-events:auto}
+.cx b{display:block;font-size:14px;overflow-wrap:anywhere}.cx small{display:block;font-size:11px;color:#a78bfa}
+.cx p{margin:6px 0 0;font-size:13px;line-height:1.4;color:#ddd6fe;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.cx.open p{display:block}.cx .fsrc{display:none;margin-top:6px}.cx.open .fsrc{display:block}
+.cx.lock{opacity:.45;filter:grayscale(1)}.cx .st3{float:right;color:#fde047;font-size:12px}
+
+#hud>.col{min-width:0;flex:1 1 auto}#hud>.col.r{flex:0 0 auto;max-width:48%}
+#hud>.col:not(.r) .chip{max-width:100%;white-space:normal;overflow-wrap:anywhere}
+.set.wrap .seg button{white-space:normal;line-height:1.15;font-size:12.5px}
+.rows>div{gap:8px}.rows>div>span{min-width:0;overflow-wrap:anywhere}.rows>div>b{flex-shrink:0}
+
+#result .btn,#fail .btn{max-width:100%}#result .btn:not(.s){min-width:min(220px,100%)}
+.set input[type=range]{flex:0 1 48%;min-width:90px;width:auto}
+@media (max-width:340px){.panel{padding:18px 10px}}
+.cx{background:rgba(14,9,34,.86)}.cx.lock{opacity:.6}#codex .list,#achs .list{max-height:70vh}
+.scr.dim{justify-content:flex-start}.scr.dim>:first-child{margin-top:auto}.scr.dim>:last-child{margin-bottom:auto}
 </style></head><body>
 <canvas id="gl"></canvas><canvas id="c"></canvas>
 <div id="ui">
- <div id="menu" class="scr on" style="justify-content:flex-end;padding-bottom:max(34px,6vh)"><h1>BLACKHOLE<br>BATTLE</h1><div class="sub">гравітаційна головоломка</div>
-  <button class="btn" id="bPlay">Грати</button><button class="btn g" id="bSectors">Сектори</button>
-  <div class="row2" style="width:min(320px,94%)"><button class="btn g" id="bAch">🏆 Досягнення</button><button class="btn g" id="bStats">📊 Статистика</button></div>
-  <button class="btn g s" id="bSettings">⚙ Налаштування</button>
+ <div id="menu" class="scr on" style="justify-content:flex-end;padding-bottom:max(34px,6vh)"><h1>BLACKHOLE<br>BATTLE</h1><div class="sub" data-i="menu.sub">гравітаційна головоломка</div>
+  <button class="btn" id="bPlay" data-i="menu.play">Грати</button><button class="btn g" id="bSectors" data-i="menu.sectors">Сектори</button>
+  <div class="row2" style="width:min(320px,94%)"><button class="btn g" id="bAch" data-i="menu.ach">🏆 Досягнення</button><button class="btn g" id="bStats" data-i="menu.stats">📊 Статистика</button></div>
+  <div class="row2" style="width:min(320px,94%)"><button class="btn g" id="bCodex" data-i="menu.codex">📖 Кодекс</button><button class="btn g" id="bSettings" data-i="menu.settings">⚙ Налаштування</button></div>
   <div id="rank"></div><div class="small" id="score" style="margin-top:4px"></div>
-  <div class="small" id="totalStars" style="margin-top:6px"></div><div class="small" id="puInfo" style="margin-top:4px"></div><div class="ver">v3.1.1</div></div>
- <div id="achs" class="scr dim"><h2>Досягнення <span class="small" id="achCount"></span></h2><div class="list" id="achList"></div><button class="btn g s" id="bAchBack">← Назад</button></div>
- <div id="stats" class="scr dim"><div class="panel"><h2>Статистика</h2><div id="statBody"></div><button class="btn g s" id="bStatBack" style="margin-top:10px">← Назад</button></div></div>
- <div id="sectors" class="scr dim"><h2>Сектори</h2><div id="secList"></div>
+  <div class="small" id="totalStars" style="margin-top:6px"></div><div class="small" id="puInfo" style="margin-top:4px"></div><div class="ver">v3.1.2</div></div>
+ <div id="achs" class="scr dim"><h2><span data-i="ach.title">Досягнення</span> <span class="small" id="achCount"></span></h2><div class="list" id="achList"></div><button class="btn g s" id="bAchBack" data-i="back">← Назад</button></div>
+ <div id="codex" class="scr dim"><h2><span data-i="codex.title">Кодекс</span> <span class="small" id="cxCount"></span></h2><div class="list" id="cxList"></div><button class="btn g s" id="bCxBack" data-i="back">← Назад</button></div>
+ <div id="factCard" class="scr dim"><div class="panel fact" id="fcPanel"><div class="flab" id="fcLab"></div><h2 id="fcTitle"></h2><p id="fcText"></p><div class="fstar" id="fcStar"></div><div class="fsrc" id="fcSrc"></div><div class="small ftap" data-i="fact.tap">Торкнись, щоб продовжити</div></div></div>
+ <div id="stats" class="scr dim"><div class="panel"><h2 data-i="stats.title">Статистика</h2><div id="statBody"></div><button class="btn g s" id="bStatBack" style="margin-top:10px" data-i="back">← Назад</button></div></div>
+ <div id="sectors" class="scr dim"><h2 data-i="sectors.title">Сектори</h2><div id="secList"></div>
   <div id="secPager"><button class="btn g s" id="sPrev">‹</button><div><span id="sPage"></span><div id="sDots"></div></div><button class="btn g s" id="sNext">›</button></div>
-  <button class="btn g s" id="bBack1">← Назад</button></div>
- <div id="levels" class="scr dim"><h2 id="secTitle">Сектор</h2><div class="grid" id="grid"></div><button class="btn g s" id="bBack2">← Сектори</button></div>
- <div id="settings" class="scr dim"><div class="panel"><h2>Налаштування</h2>
-  <div class="set"><span>📳 Вібрація</span><button class="tg" id="tVib"></button></div>
-  <div class="set"><span>🔊 Звук</span><button class="tg" id="tSnd"></button></div>
-  <div class="set"><span>Гучність ефектів</span><input type="range" id="rSfx" min="0" max="100"/></div>
-  <div class="set"><span>Гучність музики</span><input type="range" id="rMus" min="0" max="100"/></div>
-  <div class="set"><span>✨ Графіка</span><div class="seg" id="qSeg"><button data-q="auto">Авто</button><button data-q="low">Низька</button><button data-q="high">Висока</button></div></div>
-  <div class="small" id="qInfo" style="margin:10px 0"></div><div class="small" style="margin:0 0 10px;opacity:.7">Уся музика й звуки синтезуються в реальному часі.</div>
-  <button class="btn s" id="bSetBack">Готово</button></div></div>
+  <button class="btn g s" id="bBack1" data-i="back">← Назад</button></div>
+ <div id="levels" class="scr dim"><h2 id="secTitle">Сектор</h2><div class="grid" id="grid"></div><button class="btn g s" id="bBack2" data-i="backSectors">← Сектори</button></div>
+ <div id="settings" class="scr dim"><div class="panel"><h2 data-i="set.title">Налаштування</h2>
+  <div class="set"><span data-i="set.vib">📳 Вібрація</span><button class="tg" id="tVib"></button></div>
+  <div class="set"><span data-i="set.snd">🔊 Звук</span><button class="tg" id="tSnd"></button></div>
+  <div class="set"><span data-i="set.sfx">Гучність ефектів</span><input type="range" id="rSfx" min="0" max="100"/></div>
+  <div class="set"><span data-i="set.mus">Гучність музики</span><input type="range" id="rMus" min="0" max="100"/></div>
+  <div class="set wrap"><span data-i="set.gfx">✨ Графіка</span><div class="seg" id="qSeg"><button data-q="auto" data-i="set.q.auto">Авто</button><button data-q="low" data-i="set.q.low">Низька</button><button data-q="high" data-i="set.q.high">Висока</button></div></div>
+ <div class="set wrap"><span data-i="set.lang">🌐 Мова</span><div class="seg" id="langSeg"><button data-l="uk">Українська</button><button data-l="en">English</button><button data-l="es">Español</button></div></div>
+ <div class="set wrap"><span data-i="set.facts">📖 Факти</span><div class="seg" id="factSeg"><button data-f="always" data-i="set.facts.always">Завжди</button><button data-f="win" data-i="set.facts.win">Після перемоги</button><button data-f="codex" data-i="set.facts.codex">Лише в Кодексі</button></div></div>
+  <div class="small" id="qInfo" style="margin:10px 0"></div><div class="small" style="margin:0 0 10px;opacity:.7" data-i="set.synth">Уся музика й звуки синтезуються в реальному часі.</div>
+  <button class="btn s" id="bSetBack" data-i="set.done">Готово</button></div></div>
  <div id="hud">
-  <div class="col"><div class="chip" id="hLevel">1</div><div class="chip">⏱ <span id="hTime">0.0</span>с <span class="small" id="hTarget"></span></div>
-   <div class="chip" id="chipFuel">гальмо<span class="fuel"><span id="fuelF"></span></span></div><div class="chip" id="chipPol" style="display:none"></div><div class="chip" id="chipFx" style="display:none"></div></div>
+  <div class="col"><div class="chip" id="hLevel">1</div><div class="chip">⏱ <span id="hTime">0.0</span><span data-i="hud.sec">с</span> <span class="small" id="hTarget"></span></div>
+   <div class="chip" id="chipFuel"><span data-i="hud.brake">гальмо</span><span class="fuel"><span id="fuelF"></span></span></div><div class="chip" id="chipPol" style="display:none"></div><div class="chip" id="chipFx" style="display:none"></div></div>
   <div class="col r"><div class="chip pips" id="hL">запуски</div><div class="chip" id="bonus">★ <b id="hB">0</b>/3</div>
    <div><button class="btn s hb" id="bRestart">↻</button> <button class="btn g s hb" id="bMenu">☰</button></div></div>
  </div>
  <div id="pu"></div>
  <div id="hint"></div><div id="hand">👆</div><div id="toast"></div><div id="achT"></div>
- <div id="result" class="scr dim"><div class="panel"><h2 id="rTitle">Портал!</h2><div class="stars" id="rStars"></div>
-  <div class="rows" id="rRows"></div><div class="small">Рахунок</div><div class="big" id="rScore">0</div><div class="small" id="rBest"></div><div class="small" id="rTotal" style="margin-top:2px;color:#fde68a"></div><div class="small" id="rStreak" style="margin-top:4px"></div>
-  <div style="margin-top:10px"><button class="btn" id="bNext">Далі →</button><br><button class="btn g s" id="bRetry">↻ Ще раз</button> <button class="btn g s" id="bLv">Рівні</button></div></div></div>
- <div id="fail" class="scr dim"><div class="panel"><h2>Ой!</h2><p id="fText" style="margin:10px 0 16px;color:#c4b5fd"></p>
-  <button class="btn" id="bRetry2">↻ Заново</button><br><button class="btn g s" id="bLv2">Рівні</button></div></div>
+ <div id="result" class="scr dim"><div class="panel"><h2 id="rTitle" data-i="res.portal">Портал!</h2><div class="stars" id="rStars"></div>
+  <div class="rows" id="rRows"></div><div class="small" data-i="res.score">Рахунок</div><div class="big" id="rScore">0</div><div class="small" id="rBest"></div><div class="small" id="rTotal" style="margin-top:2px;color:#fde68a"></div><div class="small" id="rStreak" style="margin-top:4px"></div>
+  <div style="margin-top:10px"><button class="btn" id="bNext" data-i="res.next">Далі →</button><br><button class="btn g s" id="bRetry" data-i="res.retry">↻ Ще раз</button> <button class="btn g s" id="bLv" data-i="levels">Рівні</button></div></div></div>
+ <div id="fail" class="scr dim"><div class="panel"><h2 data-i="fail.title">Ой!</h2><p id="fText" style="margin:10px 0 16px;color:#c4b5fd"></p>
+  <button class="btn" id="bRetry2" data-i="fail.retry">↻ Заново</button><br><button class="btn g s" id="bLv2" data-i="levels">Рівні</button></div></div>
 </div>
-<script src="sim3.js"></script><script src="levels3-src.js"></script><script src="levels3.js"></script><script src="gfx.js"></script><script src="audio.js"></script><script src="sectors.js"></script><script src="prog.js"></script><script src="game3.js"></script>
+<script src="sim3.js"></script><script src="levels3-src.js"></script><script src="levels3.js"></script><script src="gfx.js"></script><script src="audio.js"></script><script src="i18n.js"></script><script src="facts3.js"></script><script src="sectors.js"></script><script src="prog.js"></script><script src="game3.js"></script>
 <script>
 document.addEventListener('gesturestart',e=>e.preventDefault());
-document.addEventListener('touchmove',e=>e.preventDefault(),{passive:false});
+document.addEventListener('touchmove',e=>{if(!(e.target.closest&&e.target.closest('.list,.scr.dim')))e.preventDefault();},{passive:false});
 document.addEventListener('dblclick',e=>e.preventDefault());
 if('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(()=>{});
 </script>

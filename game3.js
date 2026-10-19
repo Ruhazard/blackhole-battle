@@ -1,10 +1,11 @@
-/* Blackhole Battle v3.1.1 — stage 2: visuals, sound, progress (gameplay/physics unchanged from v3.0) */
+/* Blackhole Battle v3.1.2 — stage 2: visuals, sound, progress (gameplay/physics unchanged from v3.0) */
 (() => {
 'use strict';
 const S = window.BHSim;
 const LEVELS = window.BH3_LEVELS || window.BH3_SRC;
 const CAT = window.BHCat.build(LEVELS), SECTORS = CAT.sectors, LID = i => CAT.idOf[i]; window.BHProg.setCatalog(CAT);
-const PU = { extra: { i: '🚀', n: '+1 запуск' }, scan: { i: '📡', n: 'Сканер' }, shield: { i: '🛡', n: 'Щит' }, slow: { i: '⏳', n: 'Сповільнення 3с' } };
+const T = (k, v) => I18N.t(k, v);
+const PU = {}; for (const [k, i] of [['extra', '🚀'], ['scan', '📡'], ['shield', '🛡'], ['slow', '⏳']]) PU[k] = { i, get n() { return T('pu.' + k); } };
 const $ = id => document.getElementById(id);
 const cv = $('c'), octx = cv.getContext('2d'); let ctx = octx;
 const sc = document.createElement('canvas'), sctx = sc.getContext('2d');
@@ -15,17 +16,19 @@ const PR = window.BHProg;
 let W, H, DPR, SC, OX, OY, camWY = 0, Z = 1, camCX = 180, camCY = 320, QS = 1, BGS = 1, qLevel = 1, autoQ = 1, autoUp = 0, fpsT = 0, fpsN = 0;
 const X = x => OX + (180 + (x - camCX) * Z) * SC, Y = y => OY + (320 + (y - camCY) * Z) * SC, R = v => v * SC * Z;
 let lenses = [], planetCache = {}, fl = { bounces: 0, margin: 1e9 }, cpK = 0, proxK = 0;
-const QN = ['низька', 'середня', 'висока'];
+const QN = { get 0() { return T('q.0'); }, get 1() { return T('q.1'); }, get 2() { return T('q.2'); } };
 function rng(seed) { let s = seed >>> 0 || 1; return () => (s = (s * 1664525 + 1013904223) >>> 0) / 4294967296; }
 
 // ---------- save ----------
 const KEY = 'bh_v3';
 let save; try { save = JSON.parse(localStorage.getItem(KEY)) || null; } catch (e) { save = null; }
 save = Object.assign({ unlocked: 1, best: {}, tut: {}, pu: { extra: 0, scan: 0, shield: 0, slow: 0 }, streak: 0, ach: {}, set: {} }, save || {});
-save.set = Object.assign({ vib: true, snd: true, sfx: 80, mus: 60, q: 'auto' }, save.set || {}); PR.ensure(save);
+save.set = Object.assign({ vib: true, snd: true, sfx: 80, mus: 60, q: 'auto', facts: 'win' }, save.set || {}); PR.ensure(save);
+save.facts = save.facts || {}; I18N.set(save.set.lang); const FACTS = window.BH_FACTS || {}; const lvName = i => I18N.lvName(LID(i), LEVELS[i].n);
 const isOpen = i => CAT.levelOpen(save, i), bestOf = i => save.best[LID(i)];
 const persist = () => { try { localStorage.setItem(KEY, JSON.stringify(save)); } catch (e) {} };
 if (CAT.migrate(save)) persist();
+{ let ch = 0; for (const id in save.best) if (FACTS[id] && !save.facts[id]) { save.facts[id] = { t: 0, s3: save.best[id].s === 3 ? 1 : 0 }; ch = 1; } if (ch) persist(); } // facts for already-beaten levels
 const puTotal = () => Object.values(save.pu).reduce((a, b) => a + b, 0);
 
 // ---------- haptics ----------
@@ -145,26 +148,26 @@ function startLevel(i, keepGhost) {
   launchesLeft = L.L; collected = new Set(); clock = 0; started = false; resetInput();
   trail = []; attempt = []; parts = []; pops = []; aim = null; preview = []; tf = 1; active = {}; scanArmed = false; shieldOn = false; slowT = 0;
   planetCache = {}; camWY = clampCam(ship.y); Z = 1; camCX = 180; camCY = camWY + 320; fl = { bounces: 0, margin: 1e9 }; AU.aimEnd(); state = 'aim'; show(null); $('hud').style.display = 'flex'; $('hTime').textContent = '0.0';
-  $('hLevel').textContent = `${i + 1}. ${L.n}`; $('hTarget').textContent = L.t3 ? `3★ ≤ ${L.t3}с` : '';
+  $('hLevel').textContent = `${i + 1}. ${lvName(i)}`; $('hTarget').textContent = L.t3 ? `3★ ≤ ${L.t3}${T('hud.sec')}` : '';
   $('chipFuel').style.display = L.stops ? '' : 'none';
-  hud(); buildPU();
-  const h = $('hint'); h.innerHTML = '💡 ' + L.hint; h.style.display = 'block';
+  hud(); buildPU(); requestAnimationFrame(placeAch);
+  const h = $('hint'); h.innerHTML = '💡 ' + I18N.lvHint(LID(i), L.hint); h.style.display = 'block';
   $('hand').style.display = (i === 0 && !save.tut.aim) ? 'block' : 'none';
 }
 function clampCam(y) { return L.H <= 640 ? 0 : Math.max(0, Math.min(L.H - 640, y - 380)); }
 function hud() {
-  $('hL').innerHTML = 'запуски ' + Array.from({ length: L.L + (active.extra ? 1 : 0) }, (_, k) => `<i class="${k < launchesLeft ? '' : 'u'}"></i>`).join('');
+  $('hL').innerHTML = T('hud.launches') + ' ' + Array.from({ length: L.L + (active.extra ? 1 : 0) }, (_, k) => `<i class="${k < launchesLeft ? '' : 'u'}"></i>`).join('');
   $('hB').textContent = collected.size;
   $('fuelF').style.width = (100 * ship.fuel / Math.max(0.01, S.fuelFor(L))) + '%';
   $('chipFuel').classList.toggle('on', braking);
-  const cp = $('chipPol'); if (L.magnets.length) { cp.style.display = ''; cp.innerHTML = ship.flip > 0 ? 'магніти: <b style="color:#f87171">звичайні</b> · тап = змінити' : 'магніти: <b style="color:#60a5fa">інвертовані</b> · тап = змінити'; } else cp.style.display = 'none';
-  const fx = []; if (shieldOn) fx.push('🛡 щит'); if (scanArmed) fx.push('📡 сканер'); if (slowT > 0) fx.push('⏳ ' + slowT.toFixed(1) + 'с');
+  const cp = $('chipPol'); if (L.magnets.length) { cp.style.display = ''; cp.innerHTML = T(ship.flip > 0 ? 'hud.mag.norm' : 'hud.mag.inv'); } else cp.style.display = 'none';
+  const fx = []; if (shieldOn) fx.push(T('hud.shield')); if (scanArmed) fx.push(T('hud.scan')); if (slowT > 0) fx.push('⏳ ' + slowT.toFixed(1) + T('hud.sec'));
   $('chipFx').style.display = fx.length ? '' : 'none'; $('chipFx').textContent = fx.join(' · ');
 }
 function buildPU() {
   const box = $('pu'); const owned = Object.keys(PU).filter(k => save.pu[k] > 0 || active[k]);
   if (state !== 'aim' || started || !owned.length) { box.style.display = 'none'; return; }
-  box.style.display = 'flex'; box.innerHTML = '<span>Бонуси:</span>' + owned.map(k => `<button data-k="${k}" class="${active[k] ? 'act' : ''}">${PU[k].i} ${save.pu[k]}</button>`).join('');
+  box.style.display = 'flex'; box.innerHTML = '<span>' + T('hud.bonuses') + '</span>' + owned.map(k => `<button data-k="${k}" class="${active[k] ? 'act' : ''}">${PU[k].i} ${save.pu[k]}</button>`).join('');
   box.querySelectorAll('button').forEach(b => b.onclick = e => { e.stopPropagation(); usePU(b.dataset.k); });
 }
 function usePU(k) {
@@ -173,7 +176,7 @@ function usePU(k) {
   if (k === 'extra') launchesLeft++;
   if (k === 'scan') scanArmed = true;
   if (k === 'shield') shieldOn = true;
-  toast(`${PU[k].i} ${PU[k].n} активовано`); HAP.tick(); hud(); buildPU();
+  toast(T('pu.on', { i: PU[k].i, n: PU[k].n })); HAP.tick(); hud(); buildPU();
 }
 function toast(t, ms) { const e = $('toast'); e.innerHTML = t; e.style.display = 'block'; clearTimeout(toast.h); toast.h = setTimeout(() => e.style.display = 'none', ms || 1400); }
 function show(id) { document.querySelectorAll('.scr').forEach(e => e.classList.remove('on')); if (id) $(id).classList.add('on'); }
@@ -204,7 +207,7 @@ function launch(a, p) {
   launchesLeft--; started = true; state = 'fly'; aim = null; thrust = 0.35; ship.scan = scanArmed; preview = []; scanArmed = false;
   if (active.slow && !active.slowUsed) { slowT = 3; active.slowUsed = 1; }
   for (let i = 0; i < 18; i++) spark(ship.x, ship.y, '#22d3ee', 60 + Math.random() * 90, a + Math.PI + (Math.random() - .5) * 1.2);
-  $('hint').style.display = 'none'; $('hand').style.display = 'none'; $('pu').style.display = 'none';
+  $('hint').style.display = 'none'; $('hand').style.display = 'none'; $('pu').style.display = 'none'; placeAch();
   if (li === 0) { save.tut.aim = 1; persist(); }
   HAP.launch(); AU.launch(p / S.MAX_PULL * 100); save.stats.launches++; hud();
 }
@@ -266,8 +269,8 @@ function tick() {
   const stt = save.stats; stt.flight += S.STEP; if (tf < 0.6) stt.dilate += S.STEP;
   for (const h of L.holes) { const [hx, hy] = S.holePos(h, ship.t); const m = (Math.hypot(ship.x - hx, ship.y - hy) - h.r * S.KILL) / h.r; if (m < fl.margin) fl.margin = m; }
   if (ev.bounce) { shake = Math.min(12, shake + 6); burst(ship.x, ship.y, '#fbbf24', 8); HAP.bounce(); AU.bounce(); fl.bounces++; stt.bounces++; }
-  if (ev.broke >= 0) { const a = L.asteroids[ev.broke]; for (let k = 0; k < 30; k++) spark(a[0] + (Math.random() - .5) * a[2], a[1], '#a8a29e'); shake = 14; toast('💥 Астероїд розбито!', 900); AU.crash(); stt.breaks++; achCheck(); }
-  if (ev.key >= 0) { burst(L.keys[ev.key][0], L.keys[ev.key][1], '#fde047', 30); HAP.key(); AU.key(); toast('🔑 Ворота відчинено!', 1000); }
+  if (ev.broke >= 0) { const a = L.asteroids[ev.broke]; for (let k = 0; k < 30; k++) spark(a[0] + (Math.random() - .5) * a[2], a[1], '#a8a29e'); shake = 14; toast(T('ev.broke'), 900); AU.crash(); stt.breaks++; achCheck(); }
+  if (ev.key >= 0) { burst(L.keys[ev.key][0], L.keys[ev.key][1], '#fde047', 30); HAP.key(); AU.key(); toast(T('ev.gate'), 1000); }
   if (ev.worm) { burst(ship.x, ship.y, '#34d399', 24); shake = 6; trail = []; AU.worm(); stt.worms++; achCheck(); }
   const lt = trail[trail.length - 1];
   if (!lt || Math.hypot(ship.x - lt.x, ship.y - lt.y) > 2.5) { trail.push({ x: ship.x, y: ship.y, tf }); if (trail.length > 160) trail.shift(); }
@@ -280,18 +283,18 @@ function tick() {
   if (st === 'win') return win();
   if (st) {
     if (shieldOn) { shieldOn = false; deflect(st); hud(); return; }
-    return fail({ swallowed: 'Шатл перетнув горизонт подій.', moon: 'Зіткнення з місяцем!', flare: 'Шатл згорів у сонячному спалаху.', oob: 'Шатл відлетів у відкритий космос.' }[st] || 'Загибель', st);
+    return fail(['swallowed', 'moon', 'flare', 'oob'].includes(st) ? T('fail.' + st) : T('fail.generic'), st);
   }
   if (braking && flySteps > 18 && Math.hypot(ship.vx, ship.vy) < S.STOP_SPEED) {
     ship.vx = 0; ship.vy = 0; braking = false; burst(ship.x, ship.y, '#fb923c', 14); HAP.stop(); AU.stop();
-    if (launchesLeft > 0) { press = null; braking = false; aim = null; aimId = null; state = 'aim'; const h = $('hint'); h.innerHTML = '🛑 Зупинка! Цілься знову — <b>ще ' + launchesLeft + '</b>'; h.style.display = 'block'; }
-    else fail('Шатл зупинився, а запусків більше немає.', 'stranded');
+    if (launchesLeft > 0) { press = null; braking = false; aim = null; aimId = null; state = 'aim'; const h = $('hint'); h.innerHTML = T('ev.stop', { n: launchesLeft }); h.style.display = 'block'; }
+    else fail(T('fail.stranded'), 'stranded');
     hud();
   }
   if (braking && ship.fuel <= 0) braking = false;
 }
 function deflect(st) {
-  toast('🛡 Щит врятував шатл!', 1100); shake = 12; burst(ship.x, ship.y, '#67e8f9', 40); HAP.bounce(); AU.shield(); save.stats.shields++; achCheck();
+  toast(T('ev.shield'), 1100); shake = 12; burst(ship.x, ship.y, '#67e8f9', 40); HAP.bounce(); AU.shield(); save.stats.shields++; achCheck();
   let nx = -ship.vx, ny = -ship.vy;
   if (st === 'swallowed') { let best = null; for (const h of L.holes) { const [hx, hy] = S.holePos(h, ship.t); const d = Math.hypot(ship.x - hx, ship.y - hy); if (!best || d < best.d) best = { d, hx, hy, r: h.r }; }
     const dx = ship.x - best.hx, dy = ship.y - best.hy, d = Math.hypot(dx, dy) || 1; ship.x = best.hx + dx / d * best.r * (S.KILL + 1.2); ship.y = best.hy + dy / d * best.r * (S.KILL + 1.2); nx = dx / d * 220; ny = dy / d * 220; }
@@ -309,23 +312,34 @@ function win() {
   save.stats.wins++; AU.win(st);
   { const nx = CAT.nextIndex(li); if (nx != null && CAT.secOf[nx] === CAT.secOf[li]) save.open[LID(nx)] = 1; }
   let streakMsg = '';
-  if (st === 3) { save.streak++; if (save.streak % 4 === 0) streakMsg = grant(`Серія ${save.streak}× ★★★`); else streakMsg = `Серія ★★★: ${save.streak % 4}/4 до бонусу`; }
-  else { save.streak = 0; streakMsg = 'Серію ★★★ скинуто'; }
-  if (L.boss && !save.ach['boss:' + LID(li)]) { save.ach['boss:' + LID(li)] = 1; streakMsg += '<br>' + grant('Бос переможений'); }
-  const rk1 = PR.rank(PR.stars(save)); if (rk1.i > rk0.i) streakMsg += `<br>🎖 Новий ранг: <b>${rk1.name}</b>!`;
+  if (st === 3) { save.streak++; if (save.streak % 4 === 0) streakMsg = grant(T('streak.grant', { n: save.streak })); else streakMsg = T('streak.prog', { n: save.streak % 4 }); }
+  else { save.streak = 0; streakMsg = T('streak.reset'); }
+  if (L.boss && !save.ach['boss:' + LID(li)]) { save.ach['boss:' + LID(li)] = 1; streakMsg += '<br>' + grant(T('boss.beaten')); }
+  const rk1 = PR.rank(PR.stars(save)); if (rk1.i > rk0.i) streakMsg += '<br>' + T('res.rank', { r: rk1.name });
+  const fid = LID(li), fNew = !!FACTS[fid] && !save.facts[fid], f3New = !!FACTS[fid] && st === 3 && !(save.facts[fid] || {}).s3;
+  if (FACTS[fid]) save.facts[fid] = { t: (save.facts[fid] || {}).t || Date.now(), s3: ((save.facts[fid] || {}).s3 || st === 3) ? 1 : 0 };
   achCheck({ type: 'win', bonus: collected.size, margin: fl.margin, bounces: fl.bounces, time: t });
   persist();
-  $('rTitle').textContent = st === 3 ? 'Ідеально!' : st === 2 ? 'Чудово!' : 'Портал досягнуто';
+  const fMode = save.set.facts, showFact = !!FACTS[fid] && (fMode === 'always' || (fMode === 'win' && (fNew || f3New)));
+  $('rTitle').textContent = T('res.' + Math.max(1, st));
   $('rStars').innerHTML = [0, 1, 2].map(k => `<span class="${k < st ? '' : 'e'}">★</span>`).join('');
-  $('rRows').innerHTML = `<div><span>⏱ ${t.toFixed(1)}с (3★ ≤ ${L.t3}с, 2★ ≤ ${L.t2}с)</span></div><div><span>Рейтинг ${st}×1000</span><b>${st * 1000}</b></div><div><span>Бонус за час</span><b>${timePts}</b></div><div><span>Бонусні зірки ${collected.size}×250</span><b>${bon}</b></div><div><span>Запуски в запасі ${launchesLeft}×300</span><b>${unused}</b></div>`;
-  $('rScore').textContent = score; $('rTotal').textContent = `Загальний рахунок: ${PR.score(save)} · ${rk1.name}`; $('rBest').textContent = isBest ? '🏆 Новий рекорд!' : `Рекорд: ${bestOf(li).sc}`; $('rStreak').innerHTML = streakMsg;
+  $('rRows').innerHTML = `<div><span>${T('res.time', { t: t.toFixed(1), t3: L.t3, t2: L.t2 })}</span></div><div><span>${T('res.rating', { s: st })}</span><b>${st * 1000}</b></div><div><span>${T('res.timeBonus')}</span><b>${timePts}</b></div><div><span>${T('res.bonusStars', { n: collected.size })}</span><b>${bon}</b></div><div><span>${T('res.spare', { n: launchesLeft })}</span><b>${unused}</b></div>`;
+  $('rScore').textContent = score; $('rTotal').textContent = T('res.total', { s: I18N.num(PR.score(save)), r: rk1.name }); $('rBest').textContent = isBest ? T('res.record') : T('res.best', { s: bestOf(li).sc }); $('rStreak').innerHTML = streakMsg;
   $('bNext').style.display = CAT.nextIndex(li) != null && isOpen(li + 1) ? '' : 'none';
-  setTimeout(() => { if (state === 'result') show('result'); }, 450);
+  setTimeout(() => { if (state !== 'result') return; if (showFact) factCard(fid, st, fNew); else show('result'); }, 450);
+}
+function factCard(id, st, isNew) {
+  const f = I18N.fact(id); if (!f) return show('result'); const s3 = (save.facts[id] || {}).s3;
+  $('fcLab').textContent = `${isNew ? '✦ ' + T('fact.new') : T('fact.label')} · ${f.boss ? T('fact.boss') + ' · ' : ''}${T('codex.level', { n: f.n })}`;
+  $('fcTitle').textContent = f.title; $('fcText').textContent = f.text; $('fcSrc').textContent = T('fact.src', { s: f.src });
+  const fs = $('fcStar'); fs.className = 'fstar ' + (s3 ? 'on' : 'dim'); fs.textContent = s3 ? T('fact.star') : T('fact.starHint');
+  state = 'fact'; show('factCard'); AU.star(1); const t0 = performance.now();
+  $('factCard').onclick = () => { if (performance.now() - t0 < 350 || state !== 'fact') return; state = 'result'; show('result'); };
 }
 function grant(why) {
-  if (puTotal() >= 3) return `${why}: сховище бонусів повне (3/3)`;
+  if (puTotal() >= 3) return T('grant.full', { w: why });
   const keys = Object.keys(PU); const k = keys[(save.streak + Object.keys(save.ach).length + li) % keys.length]; save.pu[k]++;
-  return `🎁 ${why}: отримано ${PU[k].i} ${PU[k].n}!`;
+  return T('grant.got', { w: why, i: PU[k].i, n: PU[k].n });
 }
 function fail(msg, why) {
   resetInput(); state = 'fail'; burst(ship.x, ship.y, '#ef4444', 40); shake = 14; HAP.death(); AU.lose();
@@ -470,7 +484,7 @@ function drawFlare(f, t) {
   if (on) { const g = ctx.createLinearGradient(0, y, 0, y + h); g.addColorStop(0, 'rgba(251,146,60,.15)'); g.addColorStop(.5, `rgba(254,215,170,${.55 + .2 * Math.sin(t * 30)})`); g.addColorStop(1, 'rgba(251,146,60,.15)'); ctx.fillStyle = g; ctx.fillRect(x, y, w, h); }
   else { ctx.fillStyle = warn ? `rgba(251,146,60,${.15 + .15 * Math.sin(t * 25)})` : 'rgba(251,146,60,.05)'; ctx.fillRect(x, y, w, h); }
   ctx.strokeStyle = on ? 'rgba(254,215,170,.9)' : 'rgba(251,146,60,.35)'; ctx.setLineDash(on ? [] : [5, 5]); ctx.strokeRect(x, y, w, h); ctx.setLineDash([]);
-  ctx.fillStyle = on ? '#fff7ed' : 'rgba(253,186,116,.7)'; ctx.font = `bold ${R(11)}px sans-serif`; ctx.fillText(on ? '☀ СПАЛАХ' : warn ? '⚠ скоро' : '☀ ' + (f.period - ph).toFixed(1) + 'с', x + R(6), y + R(14));
+  ctx.fillStyle = on ? '#fff7ed' : 'rgba(253,186,116,.7)'; ctx.font = `bold ${R(11)}px sans-serif`; ctx.fillText(on ? T('flare.on') : warn ? T('flare.soon') : '☀ ' + (f.period - ph).toFixed(1) + T('hud.sec'), x + R(6), y + R(14));
 }
 function drawMagnet(m, t) {
   const x = X(m[0]), y = Y(m[1]), pol = (m[4] || 1) * ship.flip, col = pol > 0 ? '248,113,113' : '96,165,250';
@@ -483,7 +497,7 @@ function drawPortal(t) {
   const x = X(L.portal[0]), y = Y(L.portal[1]), r = R(L.pr); glow(x, y, r * 2.4, 'rgba(34,211,238,A)', .35);
   ctx.save(); ctx.translate(x, y); for (let k = 0; k < 5; k++) { ctx.rotate(t * (0.8 + k * .3)); ctx.strokeStyle = `rgba(${k % 2 ? '165,243,252' : '34,211,238'},${.8 - k * .12})`; ctx.lineWidth = R(2.4); ctx.beginPath(); ctx.arc(0, 0, r * (1 - k * .16), k, k + 4.2); ctx.stroke(); } ctx.restore();
   glow(x, y, r * .6, 'rgba(236,254,255,A)', .95);
-  if (y < 0 || y > H) { const ay = y < 0 ? 70 : H - 30; ctx.fillStyle = '#22d3ee'; ctx.font = `bold ${R(16)}px sans-serif`; ctx.textAlign = 'center'; ctx.fillText(y < 0 ? '▲ портал' : '▼ портал', x, ay); ctx.textAlign = 'left'; }
+  if (y < 0 || y > H) { const ay = y < 0 ? 70 : H - 30; ctx.fillStyle = '#22d3ee'; ctx.font = `bold ${R(16)}px sans-serif`; ctx.textAlign = 'center'; ctx.fillText(T(y < 0 ? 'portal.up' : 'portal.down'), x, ay); ctx.textAlign = 'left'; }
 }
 function drawStar(s, k, t) {
   if (collected.has(k)) return; const x = X(s[0]), y = Y(s[1]), p = 1 + Math.sin(t * 4 + k) * .18; glow(x, y, R(22) * p, 'rgba(253,224,71,A)', .45);
@@ -544,7 +558,7 @@ function drawAim() {
   ctx.strokeStyle = `rgba(${col},.35)`; ctx.lineWidth = R(6); ctx.beginPath(); ctx.arc(x, y, R(21), -Math.PI / 2, -Math.PI / 2 + k * 6.283); ctx.stroke();
   ctx.strokeStyle = `rgb(${col})`; ctx.lineWidth = R(2.2); ctx.beginPath(); ctx.arc(x, y, R(21), -Math.PI / 2, -Math.PI / 2 + k * 6.283); ctx.stroke(); ctx.globalCompositeOperation = pc; ctx.lineCap = 'butt';
   ctx.fillStyle = `rgb(${col})`; ctx.font = `bold ${R(15)}px sans-serif`; ctx.textAlign = 'center'; ctx.fillText(v.pct + '%', x, y + R(46));
-  ctx.font = `${R(10)}px sans-serif`; ctx.fillStyle = aim.fine ? '#fde68a' : '#c4b5fd'; ctx.fillText((aim.ang != null ? Math.round((-v.a * 180 / Math.PI + 360) % 360) + '°' : '') + (aim.fine ? ' · точно' : ''), x, y + R(58)); ctx.textAlign = 'left';
+  ctx.font = `${R(10)}px sans-serif`; ctx.fillStyle = aim.fine ? '#fde68a' : '#c4b5fd'; ctx.fillText((aim.ang != null ? Math.round((-v.a * 180 / Math.PI + 360) % 360) + '°' : '') + (aim.fine ? T('aim.fine') : ''), x, y + R(58)); ctx.textAlign = 'left';
 }
 function powerCol(k) { // teal -> violet -> gold -> rose
   const st = [[0, [94, 234, 212]], [.45, [167, 139, 250]], [.75, [253, 224, 71]], [1, [251, 113, 133]]]; let i = 0; while (i < st.length - 2 && k > st[i + 1][0]) i++;
@@ -677,8 +691,8 @@ function buildSectors() {
   for (let i = secPage * SEC_PAGE; i < Math.min(SECTORS.length, (secPage + 1) * SEC_PAGE); i++) { const s = SECTORS[i];
     const d = document.createElement('div'); const open = CAT.sectorOpen(save, i); d.className = 'sector' + (open ? '' : ' lock') + (s.soon ? ' soon' : ''); d.style.borderColor = s.c;
     const st = s.soon ? '' : `<div style="margin-top:4px;color:#fde047;font-size:13px">★ ${secStars(i)}/${s.ids.length * 3}</div>`;
-    d.innerHTML = `<b>${open ? '' : s.soon ? '⏳ ' : '🔒 '}${i + 1}. ${s.n}${s.soon ? ' <span class="badge">СКОРО</span>' : ''}</b><small>${s.d}</small>${st}${open || s.soon ? '' : `<small class="lk">${CAT.lockText(s)}</small>`}`;
-    d.onclick = () => { if (open) { curSector = i; buildLevels(); show('levels'); } else toast(s.soon ? '⏳ Сектор у розробці — скоро!' : '🔒 ' + CAT.lockText(s), 1300); }; $('secList').appendChild(d);
+    d.innerHTML = `<b>${open ? '' : s.soon ? '⏳ ' : '🔒 '}${i + 1}. ${I18N.secName(s)}${s.soon ? ` <span class="badge">${T('sec.soon')}</span>` : ''}</b><small>${I18N.secDesc(s)}</small>${st}${open || s.soon ? '' : `<small class="lk">${CAT.lockText(s)}</small>`}`;
+    d.onclick = () => { if (open) { curSector = i; buildLevels(); show('levels'); } else toast(s.soon ? T('sec.soonToast') : '🔒 ' + CAT.lockText(s), 1300); }; $('secList').appendChild(d);
   }
   $('secPager').style.display = pages > 1 ? 'flex' : 'none'; $('sPage').textContent = `${secPage + 1} / ${pages}`;
   $('sDots').innerHTML = pages <= 12 ? Array.from({ length: pages }, (_, k) => `<i class="${k === secPage ? 'on' : ''}" data-p="${k}"></i>`).join('') : '';
@@ -687,7 +701,7 @@ function buildSectors() {
 $('sPrev').onclick = () => { secPage--; buildSectors(); }; $('sNext').onclick = () => { secPage++; buildSectors(); };
 { let sx = null; $('secList').addEventListener('touchstart', e => { sx = e.touches[0].clientX; }, { passive: true }); $('secList').addEventListener('touchend', e => { if (sx == null) return; const dx = e.changedTouches[0].clientX - sx; sx = null; if (Math.abs(dx) > 60) { secPage += dx < 0 ? 1 : -1; buildSectors(); } }); }
 function buildLevels() {
-  const s = SECTORS[curSector]; $('secTitle').textContent = `${curSector + 1}. ${s.n}`; $('grid').innerHTML = '';
+  const s = SECTORS[curSector]; $('secTitle').textContent = `${curSector + 1}. ${I18N.secName(s)}`; $('grid').innerHTML = '';
   for (const i of s.idx) {
     const b = document.createElement('button'); const lock = !isOpen(i); const st = (bestOf(i) || {}).s || 0;
     b.className = 'lv' + (lock ? ' lock' : '') + (LEVELS[i].boss ? ' boss' : ''); b.innerHTML = `${lock ? '🔒' : LEVELS[i].boss ? '☠' : i + 1}<span>${'★'.repeat(st)}${'☆'.repeat(3 - st)}</span>`;
@@ -696,29 +710,43 @@ function buildLevels() {
 }
 function toMenu() { resetInput(); ensureBG(5); state = 'menu'; L = null; ship = null; camWY = 0; Z = 1; camCX = 180; camCY = 320; AU.aimEnd(); persist();
   const stn = PR.stars(save), rk = PR.rank(stn);
-  $('rank').innerHTML = `<b>${rk.name}</b><div class="bar"><i style="width:${rk.nextAt ? Math.round((stn - rk.at) / (rk.nextAt - rk.at) * 100) : 100}%"></i></div><span>${rk.next ? `до «${rk.next}»: ${rk.nextAt - stn} ★` : 'найвищий ранг'}</span>`;
-  $('score').textContent = `Загальний рахунок: ${PR.score(save).toLocaleString('uk-UA')} · досягнення ${Object.keys(save.achv).length}/${PR.ACH.length}`; $('hud').style.display = 'none'; $('hint').style.display = 'none'; $('hand').style.display = 'none'; $('pu').style.display = 'none';
-  $('totalStars').textContent = `★ ${totalStars()}/${CAT.maxStars} · відкрито: ${LEVELS.filter((_, i) => isOpen(i)).length}/${LEVELS.length}`;
-  $('puInfo').textContent = `Бонуси: 🚀${save.pu.extra} 📡${save.pu.scan} 🛡${save.pu.shield} ⏳${save.pu.slow} · серія ★★★ ${save.streak % 4}/4`; show('menu'); }
+  $('rank').innerHTML = `<b>${rk.name}</b><div class="bar"><i style="width:${rk.nextAt ? Math.round((stn - rk.at) / (rk.nextAt - rk.at) * 100) : 100}%"></i></div><span>${rk.next ? T('rank.next', { r: rk.next, n: rk.nextAt - stn }) : T('rank.top')}</span>`;
+  $('score').textContent = T('menu.score', { s: I18N.num(PR.score(save)), a: Object.keys(save.achv).length, b: PR.ACH.length }); $('hud').style.display = 'none'; $('hint').style.display = 'none'; $('hand').style.display = 'none'; $('pu').style.display = 'none';
+  $('totalStars').textContent = T('menu.stars', { s: totalStars(), m: CAT.maxStars, o: LEVELS.filter((_, i) => isOpen(i)).length, n: LEVELS.length });
+  $('puInfo').textContent = T('menu.pu', { list: `🚀${save.pu.extra} 📡${save.pu.scan} 🛡${save.pu.shield} ⏳${save.pu.slow}`, n: save.streak % 4 }); show('menu'); }
 function syncSettings() { $('tVib').classList.toggle('on', save.set.vib); $('tSnd').classList.toggle('on', save.set.snd); $('rSfx').value = save.set.sfx; $('rMus').value = save.set.mus;
   document.querySelectorAll('#qSeg button').forEach(b => b.classList.toggle('on', b.dataset.q === save.set.q));
-  $('qInfo').textContent = `Зараз: ${QN[qLevel]} · ${useGL ? 'WebGL (лінзування, світіння)' : 'Canvas (спрощено)'}`; AU.configure(save.set); }
+  document.querySelectorAll('#factSeg button').forEach(b => b.classList.toggle('on', b.dataset.f === save.set.facts)); applyLang();
+  $('qInfo').textContent = T('q.now', { q: QN[qLevel], r: T(useGL ? 'q.gl' : 'q.cv') }); AU.configure(save.set); }
 // ---------- achievements / stats ----------
 let achQ = [], achBusy = false;
 function achCheck(ev) { const got = PR.check(save, ev); if (got.length) { persist(); achQ.push(...got); if (!achBusy) achNext(); } }
-function achNext() { const a = achQ.shift(); if (!a) { achBusy = false; return; } achBusy = true; const e = $('achT'); e.style.top = (L && state !== 'menu') ? '130px' : '14px'; e.innerHTML = `<span class="ai">${a.i}</span><div><small>Досягнення відкрито</small><b>${a.n}</b></div>`; e.classList.add('on'); AU.ach(); HAP.star();
+function placeAch() { const e = $('achT'); const inGame = !!L && (state === 'aim' || state === 'fly'); e.classList.toggle('side', inGame); // small side toast below the HUD columns during play
+  if (inGame) { let y = 0; $('hud').querySelectorAll('.col').forEach(c => y = Math.max(y, c.getBoundingClientRect().bottom)); e.style.top = Math.round(y + 8) + 'px'; } else e.style.top = '14px'; }
+function achNext() { const a = achQ.shift(); if (!a) { achBusy = false; return; } achBusy = true; const e = $('achT'); placeAch(); e.innerHTML = `<span class="ai">${a.i}</span><div><small>${T('ach.unlocked')}</small><b>${a.n}</b></div>`; e.classList.add('on'); AU.ach(); HAP.star();
   setTimeout(() => { e.classList.remove('on'); setTimeout(achNext, 380); }, 2300); }
 function buildAch() { const n = Object.keys(save.achv).length; $('achCount').textContent = `${n} / ${PR.ACH.length}`;
-  $('achList').innerHTML = PR.ACH.map(a => { const t = save.achv[a.id]; return `<div class="ach${t ? ' got' : ''}"><span class="ai">${t ? a.i : '🔒'}</span><div><b>${a.n}</b><small>${a.d}</small>${t ? `<em>${new Date(t).toLocaleDateString('uk-UA')}</em>` : ''}</div></div>`; }).join(''); }
-const fmtT = s => { s = Math.round(s); const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), ss = s % 60; return h ? `${h} год ${m} хв` : m ? `${m} хв ${ss} с` : `${ss} с`; };
+  $('achList').innerHTML = PR.ACH.map(a => { const t = save.achv[a.id]; return `<div class="ach${t ? ' got' : ''}"><span class="ai">${t ? a.i : '🔒'}</span><div><b>${a.n}</b><small>${a.d}</small>${t ? `<em>${new Date(t).toLocaleDateString(I18N.lang === 'uk' ? 'uk-UA' : I18N.lang === 'es' ? 'es-ES' : 'en-GB')}</em>` : ''}</div></div>`; }).join(''); }
+const fmtT = s => { s = Math.round(s); const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), ss = s % 60; return h ? T('t.h', { h, m }) : m ? T('t.m', { m, s: ss }) : T('t.s', { s: ss }); };
 function buildStats() { const st = save.stats, stn = PR.stars(save), rk = PR.rank(stn), done = LEVELS.filter((_, i) => bestOf(i)).length;
-  const D = { swallowed: 'горизонт подій', moon: 'місяці', flare: 'спалахи', oob: 'відкритий космос', stranded: 'зупинка без запусків' };
-  const rows = [['Ранг', rk.name], ['Зірки', `${stn} / ${CAT.maxStars}`], ['Загальний рахунок', PR.score(save).toLocaleString('uk-UA')], ['Пройдено рівнів', `${done} / ${LEVELS.length}`], ['Запуски', st.launches], ['Час у польоті', fmtT(st.flight)], ['Час у грі', fmtT(st.play)],
-    ['Перемоги / втрати', `${st.wins} / ${st.fails}`], ...Object.keys(D).filter(k => st.deaths[k]).map(k => ['  · ' + D[k], st.deaths[k]]), ['Бонусні зірки', st.bonus], ['Рикошети', st.bounces], ['Кротові нори', st.worms], ['Перемикання магнітів', st.flips], ['Використано бонусів', st.puUsed], ['Сповільнений час', fmtT(st.dilate)]];
-  let h = '<div class="rows">' + rows.map(r => `<div><span>${r[0]}</span><b>${r[1]}</b></div>`).join('') + '</div><h3>Рекорди рівнів</h3><div class="rows lvb">';
-  for (let i = 0; i < LEVELS.length; i++) { const b = bestOf(i); if (!b) continue; h += `<div><span>${i + 1}. ${LEVELS[i].n}</span><b>${'★'.repeat(b.s)}${'☆'.repeat(3 - b.s)} ${b.sc} · ${b.t ? b.t.toFixed(1) + 'с' : '—'}</b></div>`; }
-  if (!done) h += '<div><span>Ще немає пройдених рівнів</span></div>';
+  const D = {}; for (const k of ['swallowed', 'moon', 'flare', 'oob', 'stranded']) D[k] = T('d.' + k);
+  const rows = [[T('st.rank'), rk.name], [T('st.stars'), `${stn} / ${CAT.maxStars}`], [T('st.score'), I18N.num(PR.score(save))], [T('st.done'), `${done} / ${LEVELS.length}`], [T('st.facts'), `${Object.keys(save.facts).length} / ${CAT.idOf.filter(id => FACTS[id]).length}`], [T('st.launches'), st.launches], [T('st.flight'), fmtT(st.flight)], [T('st.play'), fmtT(st.play)],
+    [T('st.wl'), `${st.wins} / ${st.fails}`], ...Object.keys(D).filter(k => st.deaths[k]).map(k => ['  · ' + D[k], st.deaths[k]]), [T('st.bonus'), st.bonus], [T('st.bounces'), st.bounces], [T('st.worms'), st.worms], [T('st.flips'), st.flips], [T('st.pu'), st.puUsed], [T('st.dilate'), fmtT(st.dilate)]];
+  let h = '<div class="rows">' + rows.map(r => `<div><span>${r[0]}</span><b>${r[1]}</b></div>`).join('') + `</div><h3>${T('st.records')}</h3><div class="rows lvb">`;
+  for (let i = 0; i < LEVELS.length; i++) { const b = bestOf(i); if (!b) continue; h += `<div><span>${i + 1}. ${lvName(i)}</span><b>${'★'.repeat(b.s)}${'☆'.repeat(3 - b.s)} ${b.sc} · ${b.t ? b.t.toFixed(1) + T('hud.sec') : '—'}</b></div>`; }
+  if (!done) h += `<div><span>${T('st.none')}</span></div>`;
   $('statBody').innerHTML = h + '</div>'; }
+function buildCodex() { const ids = CAT.idOf.filter(id => FACTS[id]), got = ids.filter(id => save.facts[id]), s3 = got.filter(id => save.facts[id].s3).length;
+  $('cxCount').textContent = T('codex.count', { a: got.length, b: ids.length, c: s3 }); let h = '';
+  for (const S of CAT.real) { const list = S.ids.filter(id => FACTS[id]); if (!list.length) continue; h += `<div class="cxh">${S.k + 1}. ${I18N.secName(S)}</div>`;
+    for (const id of list) { const f = I18N.fact(id), u = save.facts[id];
+      h += u ? `<div class="cx got" data-id="${id}">${u.s3 ? '<span class="st3">★★★</span>' : ''}<small>${T('codex.level', { n: f.n })}${f.boss ? ' · ' + T('fact.boss') : ''}</small><b>${f.title}</b><p>${f.text}</p><div class="fsrc">${T('fact.src', { s: f.src })}${u.s3 ? '' : '<br>' + T('fact.starHint')}</div></div>`
+        : `<div class="cx lock"><small>${T('codex.level', { n: f.n })}</small><b>🔒 ???</b><small>${T('codex.locked', { n: f.n })}</small></div>`; } }
+  $('cxList').innerHTML = h; $('cxList').querySelectorAll('.cx.got').forEach(e => e.onclick = () => e.classList.toggle('open')); }
+$('bCodex').onclick = () => { buildCodex(); show('codex'); }; $('bCxBack').onclick = toMenu;
+function applyLang() { I18N.apply(); document.querySelectorAll('#langSeg button').forEach(b => b.classList.toggle('on', b.dataset.l === I18N.lang)); }
+document.querySelectorAll('#langSeg button').forEach(b => b.onclick = () => { save.set.lang = I18N.set(b.dataset.l); persist(); applyLang(); syncSettings(); });
+document.querySelectorAll('#factSeg button').forEach(b => b.onclick = () => { save.set.facts = b.dataset.f; persist(); syncSettings(); });
 $('bAch').onclick = () => { buildAch(); show('achs'); }; $('bStats').onclick = () => { buildStats(); show('stats'); };
 $('bAchBack').onclick = toMenu; $('bStatBack').onclick = toMenu;
 document.querySelectorAll('#qSeg button').forEach(b => b.onclick = () => { save.set.q = b.dataset.q; if (b.dataset.q === 'auto') { autoQ = 1; autoUp = 0; } persist(); resize(); syncSettings(); });
@@ -735,9 +763,9 @@ $('bSetBack').onclick = toMenu; $('bBack1').onclick = toMenu; $('bBack2').onclic
 $('bRestart').onclick = () => { if (started) { ghost = attempt.slice(); ghostLevel = li; } startLevel(li, true); }; $('bMenu').onclick = toMenu;
 $('bNext').onclick = () => startLevel(li + 1); $('bRetry').onclick = () => startLevel(li); $('bRetry2').onclick = () => startLevel(li, true);
 $('bLv').onclick = $('bLv2').onclick = () => { curSector = CAT.secOf[li]; buildLevels(); show('levels'); };
-AU.configure(save.set); toMenu();
+AU.configure(save.set); applyLang(); toMenu();
 window.BH = { LEVELS, startLevel, launch: (a, p) => launch(a, p), get state() { return state; }, get ship() { return ship; }, get clock() { return clock; }, toMenu, save, persist,
   advance(n, brake, tg) { braking = !!brake && ship.fuel > 0; for (let i = 0; i < n && state === 'fly'; i++) { if (tg != null && i === tg) ship.flip = -ship.flip; tick(); } braking = false; },
   runPlanStep(st) { launch(st.a, st.p); for (let i = 0; i < 2600 && state === 'fly'; i++) { if (st.tg != null && i === st.tg) ship.flip = -ship.flip; braking = st.b != null && i >= st.b && ship.fuel > 0; tick(); } braking = false; },
-  show, buildSectors, syncSettings, buildAch, buildStats, achCheck, get gl() { return useGL; }, get quality() { return qLevel; }, get zoom() { return Z; }, CAT, levelId: LID, unlockAll() { LEVELS.forEach((_, i) => save.open[LID(i)] = 1); persist(); }, get braking() { return braking; }, get pressing() { return !!press; }, toScreen(x, y) { return [X(x), Y(y)]; }, stepN(n) { for (let i = 0; i < n && state === 'fly'; i++) tick(); }, freeze(b) { frozen = !!b; }, setShip(x, y, vx, vy) { ship.x = x; ship.y = y; ship.vx = vx; ship.vy = vy; } };
+  show, buildSectors, syncSettings, buildAch, buildStats, achCheck, get gl() { return useGL; }, get quality() { return qLevel; }, get zoom() { return Z; }, CAT, levelId: LID, unlockAll() { LEVELS.forEach((_, i) => save.open[LID(i)] = 1); persist(); }, get braking() { return braking; }, get pressing() { return !!press; }, toScreen(x, y) { return [X(x), Y(y)]; }, stepN(n) { for (let i = 0; i < n && state === 'fly'; i++) tick(); }, freeze(b) { frozen = !!b; }, forceWin() { if (state === 'aim' || state === 'fly') { clock = clock || 2.5; win(); } }, buildCodex, get facts() { return save.facts; }, setShip(x, y, vx, vy) { ship.x = x; ship.y = y; ship.vx = vx; ship.vy = vy; } };
 })();
