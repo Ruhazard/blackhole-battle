@@ -1,4 +1,4 @@
-/* Blackhole Battle v3.1.3 — stage 2: visuals, sound, progress (gameplay/physics unchanged from v3.0) */
+/* Blackhole Battle v3.1.4 — stage 2: visuals, sound, progress (gameplay/physics unchanged from v3.0) */
 (() => {
 'use strict';
 const S = window.BHSim;
@@ -145,7 +145,7 @@ let active = {}, scanArmed = false, shieldOn = false, slowT = 0, heartT = 0, pre
 
 function startLevel(i, keepGhost) {
   if (!keepGhost || ghostLevel !== i) { ghost = null; }
-  hintPath = null; li = i; ensureBG(SECTORS[CAT.secOf[i]].pal); L = S.prep(LEVELS[i]); ship = S.newShip(L); ship.ang = -Math.PI / 2;
+  hintPath = null; li = i; ensureBG(SECTORS[CAT.secOf[i]].pal); L = S.prep(LEVELS[i]); L.skin = resolveSkins(LID(i), L); ship = S.newShip(L); ship.ang = -Math.PI / 2;
   launchesLeft = L.L; collected = new Set(); clock = 0; started = false; resetInput();
   trail = []; attempt = []; parts = []; pops = []; aim = null; preview = []; tf = 1; active = {}; scanArmed = false; shieldOn = false; slowT = 0;
   planetCache = {}; camWY = clampCam(ship.y); Z = 1; camCX = 180; camCY = camWY + 320; fl = { bounces: 0, margin: 1e9 }; AU.aimEnd(); state = 'aim'; show(null); $('hud').style.display = 'flex'; $('hTime').textContent = '0.0';
@@ -451,7 +451,17 @@ function lightAt(px, py) {
     L.holes.forEach(h => { const [hx, hy] = S.holePos(h, tt); con(hx, hy, '253,186,116', 1, 300); }); con(L.portal[0], L.portal[1], '103,232,249', 0.7, 230); }
   return best;
 }
+// ---------- visual skins (v3.1.4): per-object looks from skins3.js; never touches physics ----------
+function resolveSkins(id, L) { const d = (window.BH_SKINS || {})[id] || {}, out = {};
+  for (const k of ['asteroids', 'planets', 'moons', 'magnets']) { const v = d[k];
+    out[k] = L[k].map((o, j) => v == null ? null : typeof v === 'string' ? v : Array.isArray(v) ? v[j] || null : (((v.y || []).find(([m]) => (k === 'moons' ? o.cy : o[1]) < m) || [0, v.d || null])[1])); }
+  return out; }
+const skinOf = (k, i) => (L && L.skin && L.skin[k] && L.skin[k][i]) || null;
+const PSKIN = { rocky: ['#a8a29e', '#3f3a36', '214,211,209'], mars: ['#fb923c', '#7c2d12', '251,146,60'], earth: ['#60a5fa', '#1e3a8a', '147,197,253'],
+  desert: ['#fde68a', '#92400e', '253,230,138'], lava: ['#991b1b', '#1c0606', '248,113,113'], gas: ['#fed7aa', '#9a3412', '253,186,116'],
+  ringed: ['#fef3c7', '#a16207', '253,230,138'], ice: ['#a5f3fc', '#155e75', '165,243,252'], sun: ['#fffbeb', '#f59e0b', '253,186,116'], neutron: ['#ffffff', '#3b82f6', '147,197,253'] };
 function planetSprite(p, i, r) {
+  const sk = skinOf('planets', i); if (sk && PSKIN[sk]) return skinSprite(p, i, r, sk);
   const key = i + '_' + Math.round(r * 10); if (planetCache[key]) return planetCache[key];
   const [c1, c2, rgb] = PCOL[(Math.round(p[0] + p[1]) + i) % PCOL.length]; const d = Math.ceil(r * 2 * DPR) + 2; const rr = rng(Math.round(p[0] * 7 + p[1] * 13 + i));
   const body = document.createElement('canvas'); body.width = body.height = d; const b = body.getContext('2d'); b.scale(DPR, DPR); const cr = r;
@@ -467,6 +477,33 @@ function planetSprite(p, i, r) {
     return !(L.planets.some(q => q !== p && near(q[0], q[1], q[2])) || L.stars.some(t => near(t[0], t[1], 12)) || L.holes.some(h => near(h.x, h.y, h.r * 3)) || near(L.portal[0], L.portal[1], L.pr) || near(L.ship[0], L.ship[1], 14) || L.moons.some(m => near(m.cx, m.cy, m.a + m.r)) || L.worms.some(w => near(w.a[0], w.a[1], 20) || near(w.b[0], w.b[1], 20))); };
   return planetCache[key] = { body, cl, rgb, ring: (p[2] > 45 || (i + Math.round(p[0])) % 4 === 1) && clear() };
 }
+function skinSprite(p, i, r, sk) {
+  const key = i + '_' + Math.round(r * 10) + sk; if (planetCache[key]) return planetCache[key];
+  const [c1, c2, rgb] = PSKIN[sk], d = Math.ceil(r * 2 * DPR) + 2, rr = rng(Math.round(p[0] * 7 + p[1] * 13 + i)), cr = r;
+  const body = document.createElement('canvas'); body.width = body.height = d; const b = body.getContext('2d'); b.scale(DPR, DPR);
+  b.save(); b.beginPath(); b.arc(cr + .5, cr + .5, cr, 0, 7); b.clip();
+  const g = b.createRadialGradient(cr * .7, cr * .7, cr * .1, cr, cr, cr * 1.05); g.addColorStop(0, c1); g.addColorStop(1, c2); b.fillStyle = g; b.fillRect(0, 0, cr * 2 + 1, cr * 2 + 1);
+  const band = (cols, n, wob) => { for (let k = 0; k < n; k++) { const y = (k + .5) / n * cr * 2; b.fillStyle = cols[k % cols.length]; b.beginPath(); b.ellipse(cr, y, cr * 1.4, cr / n * (0.55 + rr() * .5), (rr() - .5) * wob, 0, 7); b.fill(); } };
+  const spots = (n, col, s0, s1) => { for (let k = 0; k < n; k++) { b.fillStyle = col; b.beginPath(); b.arc(rr() * cr * 2, rr() * cr * 2, cr * (s0 + rr() * s1), 0, 7); b.fill(); } };
+  if (sk === 'gas') { band(['rgba(255,247,237,.55)', 'rgba(194,65,12,.45)', 'rgba(253,230,138,.4)', 'rgba(124,45,18,.4)'], 9, .06);
+    b.fillStyle = 'rgba(185,28,28,.75)'; b.beginPath(); b.ellipse(cr * 1.35, cr * 1.3, cr * .26, cr * .14, 0, 0, 7); b.fill(); b.strokeStyle = 'rgba(254,215,170,.6)'; b.lineWidth = Math.max(.6, cr * .03); b.stroke(); }
+  else if (sk === 'ringed') band(['rgba(254,243,199,.45)', 'rgba(202,138,4,.3)', 'rgba(255,251,235,.35)'], 8, .03);
+  else if (sk === 'ice') band(['rgba(236,254,255,.18)', 'rgba(8,145,178,.2)'], 6, .02);
+  else if (sk === 'desert') { band(['rgba(254,243,199,.25)', 'rgba(180,83,9,.25)'], 7, .3); spots(4, 'rgba(120,53,15,.2)', .05, .12); }
+  else if (sk === 'earth') { for (let k = 0; k < 6; k++) { b.fillStyle = k % 3 ? 'rgba(34,197,94,.75)' : 'rgba(161,98,7,.6)'; b.beginPath(); b.ellipse(rr() * cr * 2, rr() * cr * 2, cr * (.18 + rr() * .3), cr * (.1 + rr() * .2), rr() * 3, 0, 7); b.fill(); }
+    b.fillStyle = 'rgba(255,255,255,.85)'; b.beginPath(); b.ellipse(cr, cr * .06, cr * .6, cr * .16, 0, 0, 7); b.fill(); b.beginPath(); b.ellipse(cr, cr * 1.96, cr * .55, cr * .14, 0, 0, 7); b.fill(); }
+  else if (sk === 'mars') { spots(7, 'rgba(69,26,3,.28)', .05, .12); b.fillStyle = 'rgba(255,255,255,.9)'; b.beginPath(); b.ellipse(cr, cr * .08, cr * .38, cr * .13, 0, 0, 7); b.fill(); }
+  else if (sk === 'rocky') { for (let k = 0; k < 9; k++) { const x = rr() * cr * 2, y = rr() * cr * 2, s2 = cr * (.05 + rr() * .14); b.fillStyle = 'rgba(0,0,0,.25)'; b.beginPath(); b.arc(x, y, s2, 0, 7); b.fill(); b.strokeStyle = 'rgba(255,255,255,.18)'; b.lineWidth = Math.max(.5, s2 * .25); b.beginPath(); b.arc(x - s2 * .15, y - s2 * .15, s2, 3.6, 5.6); b.stroke(); } }
+  else if (sk === 'lava') { b.strokeStyle = 'rgba(251,146,60,.95)'; b.lineWidth = Math.max(.8, cr * .05); b.shadowColor = '#f97316'; b.shadowBlur = cr * .2;
+    for (let k = 0; k < 7; k++) { b.beginPath(); let x = rr() * cr * 2, y = rr() * cr * 2; b.moveTo(x, y); for (let j = 0; j < 4; j++) { x += (rr() - .5) * cr * .7; y += (rr() - .5) * cr * .7; b.lineTo(x, y); } b.stroke(); } b.shadowBlur = 0; }
+  else if (sk === 'sun') { for (let k = 0; k < 60; k++) { b.fillStyle = `rgba(${rr() < .5 ? '255,255,255' : '194,65,12'},${.08 + rr() * .1})`; b.beginPath(); b.arc(rr() * cr * 2, rr() * cr * 2, cr * (.03 + rr() * .07), 0, 7); b.fill(); }
+    spots(2, 'rgba(120,53,15,.45)', .04, .05); }
+  b.restore();
+  const cl = document.createElement('canvas'); cl.width = d * 2; cl.height = d; const c = cl.getContext('2d'); c.scale(DPR, DPR);
+  const nCl = sk === 'earth' ? 18 : sk === 'ice' || sk === 'gas' ? 6 : 0;
+  for (let k = 0; k < nCl; k++) { const x = rr() * cr * 4, y = cr * (.2 + rr() * 1.6), w = cr * (.3 + rr() * .6); const cg = c.createRadialGradient(x, y, 0, x, y, w); cg.addColorStop(0, 'rgba(255,255,255,.32)'); cg.addColorStop(1, 'rgba(255,255,255,0)'); c.fillStyle = cg; c.beginPath(); c.ellipse(x, y, w, w * .35, 0, 0, 7); c.fill(); }
+  return planetCache[key] = { body, cl, rgb, sk, ring: sk === 'ringed', self: sk === 'sun' || sk === 'neutron' };
+}
 function ringArc(x, y, r, from, to) {
   ctx.save(); ctx.translate(x, y); ctx.rotate(-0.3);
   [[1.75, 2.6, 'rgba(253,230,138,.28)'], [1.55, 1.6, 'rgba(254,243,199,.4)'], [1.38, 3.2, 'rgba(214,211,209,.22)']].forEach(([k, w, c]) => { ctx.strokeStyle = c; ctx.lineWidth = R(w); ctx.beginPath(); ctx.ellipse(0, 0, r * k, r * k * .24, 0, from, to); ctx.stroke(); });
@@ -474,26 +511,37 @@ function ringArc(x, y, r, from, to) {
 }
 function drawPlanet(p, i) {
   const x = X(p[0]), y = Y(p[1]), r = R(p[2]); const sp = planetSprite(p, i, r); const lt = lightAt(p[0], p[1]);
-  glow(x, y, r * 1.45, `rgba(${sp.rgb},A)`, .3);
+  glow(x, y, r * (sp.self ? 2.6 : 1.45), `rgba(${sp.rgb},A)`, sp.self ? .6 : .3);
+  if (sp.sk === 'neutron') neutronBeams(x, y, r, '147,197,253');
   if (sp.ring) ringArc(x, y, r, Math.PI, Math.PI * 2);
   ctx.drawImage(sp.body, x - r - .5, y - r - .5, sp.body.width / DPR, sp.body.height / DPR);
   ctx.save(); ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.clip();
   const off = ((animT * r * .06) % (r * 2)); ctx.drawImage(sp.cl, x - r - off, y - r, r * 4, r * 2); ctx.drawImage(sp.cl, x + r * 3 - off, y - r, r * 4, r * 2);
-  // terminator shadow (night side away from the light)
+  if (!sp.self) { // terminator shadow (night side away from the light)
   const lx = x + Math.cos(lt.a) * r * .55, ly = y + Math.sin(lt.a) * r * .55; const tg = ctx.createRadialGradient(lx, ly, r * .15, lx, ly, r * 1.75);
-  tg.addColorStop(0, 'rgba(0,0,8,0)'); tg.addColorStop(.55, 'rgba(0,0,8,.15)'); tg.addColorStop(.8, 'rgba(0,0,8,.72)'); tg.addColorStop(1, 'rgba(0,0,8,.9)'); ctx.fillStyle = tg; ctx.fillRect(x - r, y - r, r * 2, r * 2);
+  tg.addColorStop(0, 'rgba(0,0,8,0)'); tg.addColorStop(.55, 'rgba(0,0,8,.15)'); tg.addColorStop(.8, 'rgba(0,0,8,.72)'); tg.addColorStop(1, 'rgba(0,0,8,.9)'); ctx.fillStyle = tg; ctx.fillRect(x - r, y - r, r * 2, r * 2); }
   ctx.restore();
   // atmosphere rim, brighter on the lit side
   const ag = ctx.createLinearGradient(x - Math.cos(lt.a) * r, y - Math.sin(lt.a) * r, x + Math.cos(lt.a) * r, y + Math.sin(lt.a) * r); ag.addColorStop(0, `rgba(${sp.rgb},.08)`); ag.addColorStop(1, `rgba(${sp.rgb},.85)`);
   ctx.strokeStyle = ag; ctx.lineWidth = R(2.2); ctx.beginPath(); ctx.arc(x, y, r * 1.02, 0, 7); ctx.stroke();
   if (sp.ring) ringArc(x, y, r, 0, Math.PI);
 }
-function drawMoon(m, t) {
+function neutronBeams(x, y, r, col) { const a = animT * 2.2, pc = ctx.globalCompositeOperation; ctx.globalCompositeOperation = 'lighter';
+  for (const s of [0, Math.PI]) { const g = ctx.createLinearGradient(x, y, x + Math.cos(a + s) * r * 5, y + Math.sin(a + s) * r * 5); g.addColorStop(0, `rgba(${col},.75)`); g.addColorStop(1, `rgba(${col},0)`);
+    ctx.fillStyle = g; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + Math.cos(a + s - .14) * r * 5, y + Math.sin(a + s - .14) * r * 5); ctx.lineTo(x + Math.cos(a + s + .14) * r * 5, y + Math.sin(a + s + .14) * r * 5); ctx.closePath(); ctx.fill(); }
+  ctx.globalCompositeOperation = pc; }
+const MSKIN = { luna: ['#f8fafc', '#94a3b8', '#1e293b'], io: ['#fef9c3', '#eab308', '#713f12'], europa: ['#ffffff', '#cbd5e1', '#475569'], ice: ['#e0f2fe', '#7dd3fc', '#0c4a6e'] };
+function drawMoon(m, t, mi) {
   ctx.save(); ctx.translate(X(m.cx), Y(m.cy)); ctx.rotate(m.rot || 0); ctx.strokeStyle = 'rgba(248,113,113,.18)'; ctx.setLineDash([4, 6]); ctx.beginPath(); ctx.ellipse(0, 0, Math.max(1, R(m.a)), Math.max(1, R(m.b)), 0, 0, 7); ctx.stroke(); ctx.setLineDash([]); ctx.restore();
   const [mx, my] = S.moonPos(m, t); const x = X(mx), y = Y(my), r = R(m.r); const lt = lightAt(mx, my);
   glow(x, y, r * 2.2, 'rgba(248,113,113,A)', .25);
-  const g = ctx.createRadialGradient(x + Math.cos(lt.a) * r * .4, y + Math.sin(lt.a) * r * .4, 0, x, y, r * 1.1); g.addColorStop(0, '#f8fafc'); g.addColorStop(.6, '#94a3b8'); g.addColorStop(1, '#1e293b'); ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.fill();
-  ctx.fillStyle = 'rgba(51,65,85,.55)'; [[.3, -.2, .25], [-.35, .3, .18], [.05, .45, .12]].forEach(c => { ctx.beginPath(); ctx.arc(x + c[0] * r, y + c[1] * r, c[2] * r, 0, 7); ctx.fill(); });
+  const g = ctx.createRadialGradient(x + Math.cos(lt.a) * r * .4, y + Math.sin(lt.a) * r * .4, 0, x, y, r * 1.1); const msk = skinOf('moons', mi), mc = MSKIN[msk] || MSKIN.luna; g.addColorStop(0, mc[0]); g.addColorStop(.6, mc[1]); g.addColorStop(1, mc[2]); ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.fill();
+  if (msk === 'io') { [[.3, -.2, .16, '#ea580c'], [-.35, .3, .12, '#1c1917'], [.05, .45, .1, '#dc2626'], [-.2, -.4, .09, '#f97316']].forEach(c => { ctx.fillStyle = c[3]; ctx.beginPath(); ctx.arc(x + c[0] * r, y + c[1] * r, c[2] * r, 0, 7); ctx.fill(); });
+    const pa = .5 + .5 * Math.sin(t * 5); ctx.fillStyle = `rgba(253,224,71,${.35 * pa})`; ctx.beginPath(); ctx.ellipse(x - r * .2, y - r * 1.15, r * .3, r * .45 * pa + r * .1, 0, 0, 7); ctx.fill(); } // volcanic plume
+  else if (msk === 'europa') { ctx.save(); ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.clip(); ctx.strokeStyle = 'rgba(146,64,14,.6)'; ctx.lineWidth = Math.max(.6, r * .07); const q = rng(7);
+    for (let k = 0; k < 6; k++) { ctx.beginPath(); ctx.moveTo(x + (q() - .5) * r * 2.2, y - r); ctx.quadraticCurveTo(x + (q() - .5) * r * 2, y, x + (q() - .5) * r * 2.2, y + r); ctx.stroke(); } ctx.restore(); }
+  else if (msk === 'ice') { ctx.fillStyle = 'rgba(255,255,255,.7)'; ctx.beginPath(); ctx.arc(x - r * .3, y - r * .3, r * .22, 0, 7); ctx.fill(); }
+  else { ctx.fillStyle = 'rgba(51,65,85,.55)'; [[.3, -.2, .25], [-.35, .3, .18], [.05, .45, .12]].forEach(c => { ctx.beginPath(); ctx.arc(x + c[0] * r, y + c[1] * r, c[2] * r, 0, 7); ctx.fill(); }); }
   const [nx, ny] = S.moonPos(m, t + 0.15); ctx.strokeStyle = 'rgba(248,113,113,.6)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(X(nx), Y(ny)); ctx.stroke();
 }
 function rectPath(a, i, jag) {
@@ -503,8 +551,16 @@ function rectPath(a, i, jag) {
 function drawAsteroid(a, i) {
   if (a[5] && (ship.broken >> i) & 1) return;
   ctx.save(); ctx.translate(X(a[0]), Y(a[1])); ctx.rotate(a[4]); rectPath(a, i, true);
-  const g = ctx.createLinearGradient(0, -R(a[3]), 0, R(a[3])); g.addColorStop(0, a[5] ? '#d6d3d1' : '#a8a29e'); g.addColorStop(.5, '#57534e'); g.addColorStop(1, '#292524');
-  ctx.fillStyle = g; ctx.fill(); ctx.strokeStyle = a[5] ? 'rgba(250,250,250,.8)' : 'rgba(253,186,116,.5)'; ctx.lineWidth = 1; ctx.stroke();
+  const ask = skinOf('asteroids', i), g = ctx.createLinearGradient(0, -R(a[3]), 0, R(a[3]));
+  const AC = ask === 'ice' ? ['#f0f9ff', '#7dd3fc', '#0c4a6e', 'rgba(224,242,254,.9)'] : ask === 'metal' ? ['#f1f5f9', '#64748b', '#0f172a', 'rgba(203,213,225,.8)'] : [a[5] ? '#d6d3d1' : '#a8a29e', '#57534e', '#292524', a[5] ? 'rgba(250,250,250,.8)' : 'rgba(253,186,116,.5)'];
+  g.addColorStop(0, AC[0]); g.addColorStop(.5, AC[1]); g.addColorStop(1, AC[2]); ctx.fillStyle = g; ctx.fill(); ctx.strokeStyle = AC[3]; ctx.lineWidth = 1; ctx.stroke();
+  if (ask === 'ice' || ask === 'metal' || !ask) { ctx.save(); ctx.clip(); const w = R(a[2]), h = R(a[3]), q = rng(i * 31 + 7), n = Math.max(4, Math.round(a[2] / 14));
+    if (ask === 'ice') { ctx.fillStyle = 'rgba(255,255,255,.55)'; for (let k = 0; k < n * 2; k++) ctx.fillRect(-w / 2 + q() * w, -h / 2 + q() * h * .5, R(1.4), R(1.4)); // frost
+      for (let k = 0; k < n; k++) { const gx = -w / 2 + q() * w, gy = -h / 2 + q() * h, tw = Math.max(0, Math.sin(animT * 3 + k * 2.3)); if (tw > .6) { const s2 = R(4) * tw; ctx.fillStyle = `rgba(255,255,255,${tw})`; ctx.fillRect(gx - s2, gy - .5, s2 * 2, 1); ctx.fillRect(gx - .5, gy - s2, 1, s2 * 2); } } } // glints
+    else if (ask === 'metal') { ctx.fillStyle = 'rgba(255,255,255,.35)'; ctx.fillRect(-w / 2, -h * .28, w, R(1.6)); ctx.fillStyle = 'rgba(15,23,42,.7)'; for (let k = 0; k < n; k++) { ctx.beginPath(); ctx.arc(-w / 2 + (k + .5) * w / n, h * .15, R(1.3), 0, 7); ctx.fill(); }
+      const sx = ((animT * .25 + i * .37) % 1.6 - .3) * w - w / 2; const sg = ctx.createLinearGradient(sx - R(10), 0, sx + R(10), 0); sg.addColorStop(0, 'rgba(255,255,255,0)'); sg.addColorStop(.5, 'rgba(255,255,255,.35)'); sg.addColorStop(1, 'rgba(255,255,255,0)'); ctx.fillStyle = sg; ctx.fillRect(sx - R(10), -h, R(20), h * 2); }
+    else { ctx.fillStyle = 'rgba(41,37,36,.45)'; for (let k = 0; k < n; k++) { ctx.beginPath(); ctx.arc(-w / 2 + q() * w, -h / 2 + q() * h, R(1.2 + q() * 2), 0, 7); ctx.fill(); } } // rock pits
+    ctx.restore(); }
   if (a[5]) { ctx.strokeStyle = 'rgba(255,255,255,.85)'; ctx.lineWidth = 1.5; const w = R(a[2]); ctx.beginPath(); for (let k = -2; k <= 2; k++) { ctx.moveTo(k * w / 6, -R(a[3]) / 2); ctx.lineTo(k * w / 6 + R(5), 0); ctx.lineTo(k * w / 6 - R(3), R(a[3]) / 2); } ctx.stroke(); }
   ctx.restore();
 }
@@ -548,6 +604,10 @@ function drawMagnet(m, t) {
   const x = X(m[0]), y = Y(m[1]), pol = (m[4] || 1) * ship.flip, col = pol > 0 ? '248,113,113' : '96,165,250';
   ctx.strokeStyle = `rgba(${col},.3)`; ctx.setLineDash([3, 5]); ctx.beginPath(); ctx.arc(x, y, R(m[3]), 0, 7); ctx.stroke(); ctx.setLineDash([]);
   for (let k = 0; k < 10; k++) { const a = k / 10 * 6.28; let s = (t * .7 + k / 10) % 1; s = pol > 0 ? 1 - s : s; const rr = R(m[3]) * (1 - s * .85); ctx.fillStyle = `rgba(${col},.9)`; ctx.beginPath(); ctx.arc(x + Math.cos(a + s) * rr, y + Math.sin(a + s) * rr, R(2), 0, 7); ctx.fill(); }
+  if (skinOf('magnets', L.magnets.indexOf(m)) === 'magnetar') { // neutron-star look: blazing core + rotating twin beams, polarity ring and +/- kept
+    neutronBeams(x, y, R(8), col); glow(x, y, R(22), `rgba(${col},A)`, .7); const cg = ctx.createRadialGradient(x, y, 0, x, y, R(8)); cg.addColorStop(0, '#ffffff'); cg.addColorStop(.5, '#e0f2fe'); cg.addColorStop(1, `rgba(${col},.9)`);
+    ctx.fillStyle = cg; ctx.beginPath(); ctx.arc(x, y, R(7), 0, 7); ctx.fill(); ctx.strokeStyle = pol > 0 ? '#ef4444' : '#3b82f6'; ctx.lineWidth = R(2.5); ctx.beginPath(); ctx.arc(x, y, R(11 + Math.sin(t * 8) * .8), 0, 7); ctx.stroke();
+    ctx.fillStyle = '#fff'; ctx.font = `bold ${R(12)}px sans-serif`; ctx.textAlign = 'center'; ctx.fillText(pol > 0 ? '+' : '−', x, y - R(15)); ctx.textAlign = 'left'; return; }
   ctx.save(); ctx.translate(x, y); ctx.lineWidth = R(7); ctx.strokeStyle = pol > 0 ? '#ef4444' : '#3b82f6'; ctx.beginPath(); ctx.arc(0, R(2), R(11), 0, Math.PI); ctx.stroke();
   ctx.beginPath(); ctx.moveTo(-R(11), R(2)); ctx.lineTo(-R(11), -R(10)); ctx.moveTo(R(11), R(2)); ctx.lineTo(R(11), -R(10)); ctx.stroke(); ctx.fillStyle = '#fff'; ctx.font = `bold ${R(12)}px sans-serif`; ctx.textAlign = 'center'; ctx.fillText(pol > 0 ? '+' : '−', 0, -R(14)); ctx.restore();
 }
@@ -721,7 +781,7 @@ function frame(now) {
     const t = ship.t;
     L.flares.forEach(f => drawFlare(f, t)); L.magnets.forEach(m => drawMagnet(m, animT));
     L.planets.forEach(drawPlanet); L.asteroids.forEach(drawAsteroid); L.gates.forEach(g => drawGate(g, animT)); L.worms.forEach((w, i) => drawWorm(w, animT, i));
-    L.moons.forEach(m => drawMoon(m, t)); L.holes.forEach(h => drawHoleTop(h, t));
+    L.moons.forEach((m, mi) => drawMoon(m, t, mi)); L.holes.forEach(h => drawHoleTop(h, t));
     drawPortal(animT); L.keys.forEach((k, i) => drawKey(k, i, animT)); L.stars.forEach((s, k) => drawStar(s, k, animT));
     drawGhost(); drawHintPath(); drawTrail(); drawAim(); if (state !== 'fail') drawShuttle(); if (state === 'aim' && aim && aim.ang != null) drawBeam(aimVec()); drawFX(dt); if (!useGL) drawSlowmo();
   } else {
@@ -831,5 +891,5 @@ AU.configure(save.set); applyLang(); toMenu();
 window.BH = { LEVELS, startLevel, launch: (a, p) => launch(a, p), get state() { return state; }, get ship() { return ship; }, get clock() { return clock; }, toMenu, save, persist,
   advance(n, brake, tg) { braking = !!brake && ship.fuel > 0; for (let i = 0; i < n && state === 'fly'; i++) { if (tg != null && i === tg) ship.flip = -ship.flip; tick(); } braking = false; },
   runPlanStep(st) { launch(st.a, st.p); for (let i = 0; i < 2600 && state === 'fly'; i++) { if (st.tg != null && i === st.tg) ship.flip = -ship.flip; braking = st.b != null && i >= st.b && ship.fuel > 0; tick(); } braking = false; },
-  show, buildSectors, syncSettings, buildAch, buildStats, achCheck, get gl() { return useGL; }, get quality() { return qLevel; }, get zoom() { return Z; }, CAT, levelId: LID, unlockAll() { LEVELS.forEach((_, i) => save.open[LID(i)] = 1); persist(); }, get braking() { return braking; }, get pressing() { return !!press; }, toScreen(x, y) { return [X(x), Y(y)]; }, stepN(n) { for (let i = 0; i < n && state === 'fly'; i++) tick(); }, freeze(b) { frozen = !!b; }, forceWin() { if (state === 'aim' || state === 'fly') { clock = clock || 2.5; win(); } }, buildCodex, get facts() { return save.facts; }, get trapT() { return trapT; }, get trapHint() { return trapHint; }, get failTok() { return failTok; }, get hintPath() { return hintPath; }, useHintPath, solverPath, setShip(x, y, vx, vy) { ship.x = x; ship.y = y; ship.vx = vx; ship.vy = vy; } };
+  show, buildSectors, syncSettings, buildAch, buildStats, achCheck, get gl() { return useGL; }, get quality() { return qLevel; }, get zoom() { return Z; }, CAT, levelId: LID, unlockAll() { LEVELS.forEach((_, i) => save.open[LID(i)] = 1); persist(); }, get braking() { return braking; }, get pressing() { return !!press; }, toScreen(x, y) { return [X(x), Y(y)]; }, stepN(n) { for (let i = 0; i < n && state === 'fly'; i++) tick(); }, freeze(b) { frozen = !!b; }, forceWin() { if (state === 'aim' || state === 'fly') { clock = clock || 2.5; win(); } }, buildCodex, get facts() { return save.facts; }, get trapT() { return trapT; }, get trapHint() { return trapHint; }, get failTok() { return failTok; }, get hintPath() { return hintPath; }, get skin() { return L && L.skin; }, useHintPath, solverPath, setShip(x, y, vx, vy) { ship.x = x; ship.y = y; ship.vx = vx; ship.vy = vy; } };
 })();
