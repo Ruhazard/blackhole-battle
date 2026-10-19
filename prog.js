@@ -5,14 +5,16 @@ window.BHProg = (() => {
   const SECN = ['Пояс Кеплера', 'Місяці Гіганта', 'Магнітар', 'Кротові нори', 'Горизонт подій'];
   const stars = s => Object.values(s.best).reduce((a, b) => a + (b.s || 0), 0);
   const score = s => Object.values(s.best).reduce((a, b) => a + (b.sc || 0), 0);
-  const secStars = (s, k) => { let n = 0; for (let i = k * 10; i < k * 10 + 10; i++) n += (s.best[i] || {}).s || 0; return n; };
+  let cat = null; // set by the game: level/sector catalog (id-keyed saves)
+  const secStars = (s, k) => cat.real[k] ? cat.real[k].ids.reduce((n, id) => n + ((s.best[id] || {}).s || 0), 0) : 0;
+  const bossBeaten = (s, k) => { const S = cat && cat.real[k]; return !!(S && s.best[S.ids[S.ids.length - 1]]); };
   function rank(st) { let i = 0; while (i + 1 < RANKS.length && st >= RANKS[i + 1][0]) i++; const nx = RANKS[i + 1]; return { i, name: RANKS[i][1], at: RANKS[i][0], next: nx ? nx[1] : null, nextAt: nx ? nx[0] : null }; }
   // ev: {type:'win'|'fail'|'event', ...}
   const ACH = [
     { id: 'first', i: '🚀', n: 'Перший старт', d: 'Пройди будь-який рівень', t: s => s.stats.wins >= 1 },
     { id: 'perfect', i: '⭐', n: 'Ідеальна траєкторія', d: 'Отримай ★★★ на рівні', t: s => Object.values(s.best).some(b => b.s === 3) },
-    ...SECN.map((n, k) => ({ id: 'sec' + (k + 1), i: ['🪐', '🌙', '🧲', '🌀', '🕳'][k], n: `Сектор ${k + 1}: ${n}`, d: `Переможи боса сектора ${k + 1}`, t: s => !!s.best[k * 10 + 9] })),
-    { id: 'sector30', i: '🌟', n: 'Зоряний сектор', d: 'Збери 30/30 ★ в одному секторі', t: s => [0, 1, 2, 3, 4].some(k => secStars(s, k) >= 30) },
+    ...SECN.map((n, k) => ({ id: 'sec' + (k + 1), i: ['🪐', '🌙', '🧲', '🌀', '🕳'][k], n: `Сектор ${k + 1}: ${n}`, d: `Переможи боса сектора ${k + 1}`, t: s => bossBeaten(s, k) })),
+    { id: 'sector30', i: '🌟', n: 'Зоряний сектор', d: 'Збери 30/30 ★ в одному секторі', t: s => cat.real.some((S, k) => secStars(s, k) >= S.ids.length * 3) },
     { id: 'collector', i: '💫', n: 'Збирач', d: 'Збери всі 3 бонусні зірки за один політ', t: (s, e) => e.type === 'win' && e.bonus >= 3 },
     { id: 'streak', i: '🔥', n: 'Серія', d: '4 рівні поспіль на ★★★', t: s => s.streak >= 4 },
     { id: 'nearmiss', i: '😰', n: 'На волосині', d: 'Пройди повз горизонт подій впритул і дійди до порталу', t: (s, e) => e.type === 'win' && e.margin != null && e.margin < 0.45 },
@@ -35,5 +37,5 @@ window.BHProg = (() => {
     return s;
   }
   function check(s, ev) { const out = []; for (const a of ACH) if (!s.achv[a.id]) { let ok = false; try { ok = a.t(s, ev || { type: 'event' }); } catch (e) {} if (ok) { s.achv[a.id] = Date.now(); out.push(a); } } return out; }
-  return { RANKS, ACH, rank, stars, score, secStars, ensure, check };
+  return { RANKS, ACH, rank, stars, score, secStars, ensure, check, setCatalog(c) { cat = c; } };
 })();

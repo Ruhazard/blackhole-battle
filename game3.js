@@ -1,14 +1,9 @@
-/* Blackhole Battle v3.1 — stage 2: visuals, sound, progress (gameplay/physics unchanged from v3.0) */
+/* Blackhole Battle v3.1.1 — stage 2: visuals, sound, progress (gameplay/physics unchanged from v3.0) */
 (() => {
 'use strict';
 const S = window.BHSim;
 const LEVELS = window.BH3_LEVELS || window.BH3_SRC;
-const SECTORS = [
-  { n: 'Пояс Кеплера', d: 'Сила, точність, одна діра, гальмо', c: '#7c3aed' },
-  { n: 'Місяці Гіганта', d: 'Рухомі місяці, таймінг, рикошети', c: '#0ea5e9' },
-  { n: 'Магнітар', d: 'Полярні магніти, білі діри, вітер і ліфти', c: '#db2777' },
-  { n: 'Кротові нори', d: 'Нори, ворота й ключі, ламані маршрути', c: '#10b981' },
-  { n: 'Горизонт подій', d: 'Усе разом: пульсари й подвійні діри', c: '#ea580c' }];
+const CAT = window.BHCat.build(LEVELS), SECTORS = CAT.sectors, LID = i => CAT.idOf[i]; window.BHProg.setCatalog(CAT);
 const PU = { extra: { i: '🚀', n: '+1 запуск' }, scan: { i: '📡', n: 'Сканер' }, shield: { i: '🛡', n: 'Щит' }, slow: { i: '⏳', n: 'Сповільнення 3с' } };
 const $ = id => document.getElementById(id);
 const cv = $('c'), octx = cv.getContext('2d'); let ctx = octx;
@@ -28,7 +23,9 @@ const KEY = 'bh_v3';
 let save; try { save = JSON.parse(localStorage.getItem(KEY)) || null; } catch (e) { save = null; }
 save = Object.assign({ unlocked: 1, best: {}, tut: {}, pu: { extra: 0, scan: 0, shield: 0, slow: 0 }, streak: 0, ach: {}, set: {} }, save || {});
 save.set = Object.assign({ vib: true, snd: true, sfx: 80, mus: 60, q: 'auto' }, save.set || {}); PR.ensure(save);
+const isOpen = i => CAT.levelOpen(save, i), bestOf = i => save.best[LID(i)];
 const persist = () => { try { localStorage.setItem(KEY, JSON.stringify(save)); } catch (e) {} };
+if (CAT.migrate(save)) persist();
 const puTotal = () => Object.values(save.pu).reduce((a, b) => a + b, 0);
 
 // ---------- haptics ----------
@@ -43,25 +40,68 @@ const HAP = {
 
 // ---------- background ----------
 let bg = null, layers = [], twinkles = [];
-function buildBG() {
-  const r = rng(7);
-  bg = document.createElement('canvas'); bg.width = W * BGS; bg.height = H * BGS;
-  const b = bg.getContext('2d'); b.scale(BGS, BGS);
-  const g = b.createLinearGradient(0, 0, 0, H); g.addColorStop(0, '#05030f'); g.addColorStop(.5, '#0a0520'); g.addColorStop(1, '#03020a');
-  b.fillStyle = g; b.fillRect(0, 0, W, H);
-  const neb = [['124,58,237', .24], ['219,39,119', .15], ['14,165,233', .13], ['234,88,12', .09]];
-  for (let i = 0; i < 11; i++) { const [c, a] = neb[i % 4]; const x = r() * W, y = r() * H, rad = (0.2 + r() * 0.45) * Math.max(W, H);
-    const ng = b.createRadialGradient(x, y, 0, x, y, rad); ng.addColorStop(0, `rgba(${c},${a})`); ng.addColorStop(.5, `rgba(${c},${a * .35})`); ng.addColorStop(1, `rgba(${c},0)`); b.fillStyle = ng; b.fillRect(0, 0, W, H); }
-  // dust lanes
-  b.globalCompositeOperation = 'multiply'; for (let i = 0; i < 5; i++) { const x = r() * W, y = r() * H, rad = (0.1 + r() * 0.25) * W; const dg = b.createRadialGradient(x, y, 0, x, y, rad); dg.addColorStop(0, 'rgba(10,6,20,.55)'); dg.addColorStop(1, 'rgba(10,6,20,0)'); b.fillStyle = dg; b.fillRect(0, 0, W, H); } b.globalCompositeOperation = 'source-over';
-  layers = [0.6, 1, 1.6].map((sz, li) => {
-    const L = document.createElement('canvas'); L.width = (W + 80) * BGS; L.height = (H + 80) * BGS; const c = L.getContext('2d'); c.scale(BGS, BGS);
-    for (let i = 0; i < [280, 120, 42][li]; i++) { const x = r() * (W + 80), y = r() * (H + 80), a = 0.3 + r() * 0.7, tint = ['255,255,255', '199,210,254', '254,243,199', '191,219,254'][Math.floor(r() * 4)]; c.fillStyle = `rgba(${tint},${a})`; c.beginPath(); c.arc(x, y, sz * (0.5 + r()), 0, 7); c.fill();
-      if (li === 2 && r() < .35) { c.strokeStyle = `rgba(${tint},${a * .35})`; c.lineWidth = .6; c.beginPath(); c.moveTo(x - 5, y); c.lineTo(x + 5, y); c.moveTo(x, y - 5); c.lineTo(x, y + 5); c.stroke(); } }
-    return L;
-  });
-  twinkles = Array.from({ length: 45 }, () => ({ x: r() * W, y: r() * H, p: r() * 6.28, s: 0.6 + r() * 1.4, f: 1 + r() * 3 }));
+// ---------- painted procedural space (Space-Rangers-like): fbm nebulae, dust lanes, far galaxies/suns/planets, parallax, dust, comets ----------
+const PAL = [ // per sector: base, nebula A, nebula B, highlight, dust tint
+  { base: ['#05030f', '#0b0626', '#03020a'], a: [124, 58, 237], b: [37, 99, 235], h: [94, 234, 212], d: [167, 139, 250] },   // 1 Пояс Кеплера
+  { base: ['#020812', '#06182a', '#02050a'], a: [14, 165, 233], b: [20, 184, 166], h: [253, 224, 71], d: [125, 211, 252] },  // 2 Місяці Гіганта
+  { base: ['#0d0310', '#22061f', '#06020a'], a: [219, 39, 119], b: [79, 70, 229], h: [251, 113, 133], d: [244, 114, 182] },  // 3 Магнітар
+  { base: ['#020c0a', '#04201a', '#020806'], a: [16, 185, 129], b: [124, 58, 237], h: [167, 243, 208], d: [110, 231, 183] },  // 4 Кротові нори
+  { base: ['#0f0503', '#2a0a06', '#080203'], a: [234, 88, 12], b: [190, 18, 60], h: [253, 186, 116], d: [251, 146, 60] },    // 5 Горизонт подій
+  { base: ['#06030f', '#140828', '#03020a'], a: [147, 51, 234], b: [219, 39, 119], h: [56, 189, 248], d: [196, 181, 253] },  // menu
+];
+let bgSet = null, bgCache = {}, bgKey = -1, dust = [], comets = [], cometT = 3;
+function hash2(x, y, s) { let h = (x * 374761393 + y * 668265263 + s * 2246822519) | 0; h = Math.imul(h ^ (h >>> 13), 1274126177); return ((h ^ (h >>> 16)) >>> 0) / 4294967296; }
+function vnoise(x, y, s) { const xi = Math.floor(x), yi = Math.floor(y), xf = x - xi, yf = y - yi, u = xf * xf * (3 - 2 * xf), v = yf * yf * (3 - 2 * yf);
+  const a = hash2(xi, yi, s), b = hash2(xi + 1, yi, s), c = hash2(xi, yi + 1, s), d = hash2(xi + 1, yi + 1, s); return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v; }
+function fbm(x, y, s, oct) { let f = 0, amp = .5, fr = 1; for (let o = 0; o < oct; o++) { f += amp * vnoise(x * fr, y * fr, s + o * 17); fr *= 2.03; amp *= .5; } return f / (1 - Math.pow(.5, oct)); }
+const sstep = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+function buildBGSet(key) {
+  const P = PAL[key], r = rng(97 + key * 31), seed = 11 + key * 7, M = 30, BW = W + M * 2, BH = H + M * 2;
+  const mk = (w, h) => { const c = document.createElement('canvas'); c.width = Math.ceil(w * BGS); c.height = Math.ceil(h * BGS); const x = c.getContext('2d'); x.scale(BGS, BGS); return [c, x]; };
+  const [base, b] = mk(BW, BH);
+  const g = b.createLinearGradient(0, 0, BW * .3, BH); g.addColorStop(0, P.base[0]); g.addColorStop(.5, P.base[1]); g.addColorStop(1, P.base[2]); b.fillStyle = g; b.fillRect(0, 0, BW, BH);
+  // fbm nebula field rendered at low res, upscaled smoothly -> soft painted look
+  const ds = qLevel === 0 ? 5 : 3, nw = Math.ceil(BW / ds), nh = Math.ceil(BH / ds), oct = qLevel === 0 ? 4 : 5;
+  const nc = document.createElement('canvas'); nc.width = nw; nc.height = nh; const nx = nc.getContext('2d'); const id = nx.createImageData(nw, nh), D = id.data; const sc0 = 3.2 / Math.max(nw, nh);
+  for (let y = 0; y < nh; y++) for (let x = 0; x < nw; x++) {
+    const fx = x * sc0, fy = y * sc0; const wx = fbm(fx + 3.1, fy + 1.7, seed + 5, 3) * 1.6, wy = fbm(fx - 2.3, fy + 4.4, seed + 9, 3) * 1.6; // domain warp = swirly brush strokes
+    const n1 = fbm(fx + wx, fy + wy, seed, oct), n2 = fbm(fx * 1.7 + 9, fy * 1.7 - 3, seed + 3, 4), n3 = fbm(fx * 2.4 - wx, fy * 2.4 + wy, seed + 7, 4);
+    const dens = Math.pow(sstep(.38, .82, n1), 1.35), hi = sstep(.68, .92, n1) * sstep(.45, .8, n3), ridge = 1 - Math.abs(2 * n3 - 1), dark = sstep(.82, .97, ridge) * .7;
+    const m = sstep(.3, .7, n2); let R0 = P.a[0] + (P.b[0] - P.a[0]) * m, G0 = P.a[1] + (P.b[1] - P.a[1]) * m, B0 = P.a[2] + (P.b[2] - P.a[2]) * m;
+    R0 += (P.h[0] - R0) * hi; G0 += (P.h[1] - G0) * hi; B0 += (P.h[2] - B0) * hi;
+    const al = Math.min(1, dens * .78 + hi * .5) * (1 - dark); const o = (y * nw + x) * 4; D[o] = R0; D[o + 1] = G0; D[o + 2] = B0; D[o + 3] = al * 255;
+  }
+  nx.putImageData(id, 0, 0); b.imageSmoothingEnabled = true; b.imageSmoothingQuality = 'high'; b.drawImage(nc, 0, 0, BW, BH);
+  b.globalCompositeOperation = 'screen'; b.globalAlpha = .45; b.drawImage(nc, -BW * .05, -BH * .03, BW * 1.1, BH * 1.06); b.globalAlpha = 1; // glow pass
+  // brush highlights: soft bright cores
+  for (let i = 0; i < 6; i++) { const x = r() * BW, y = r() * BH, rad = (40 + r() * 110); const c = [P.h, P.a, P.b][i % 3]; const hg = b.createRadialGradient(x, y, 0, x, y, rad); hg.addColorStop(0, `rgba(${c},.28)`); hg.addColorStop(1, `rgba(${c},0)`); b.fillStyle = hg; b.fillRect(0, 0, BW, BH); }
+  b.globalCompositeOperation = 'source-over';
+  // embedded star clusters
+  for (let i = 0; i < 3; i++) { const cx = r() * BW, cy = r() * BH; for (let k = 0; k < 60; k++) { const a = r() * 6.28, d = Math.pow(r(), 2) * 50; b.fillStyle = `rgba(255,255,255,${.3 + r() * .6})`; b.fillRect(cx + Math.cos(a) * d, cy + Math.sin(a) * d, .9, .9); } }
+  // far layer: galaxies, a distant sun, a dim giant planet (all clearly background: dim, no gameplay meaning)
+  const [far, f] = mk(BW, BH);
+  for (let i = 0; i < 2 + (qLevel > 0 ? 1 : 0); i++) { const gx = r() * BW, gy = r() * BH, gr = 14 + r() * 26, rot = r() * 3.14, tilt = .3 + r() * .5;
+    f.save(); f.translate(gx, gy); f.rotate(rot); f.scale(1, tilt); const cg = f.createRadialGradient(0, 0, 0, 0, 0, gr * .5); cg.addColorStop(0, 'rgba(255,248,230,.85)'); cg.addColorStop(1, 'rgba(255,248,230,0)'); f.fillStyle = cg; f.beginPath(); f.arc(0, 0, gr * .5, 0, 7); f.fill();
+    for (let arm = 0; arm < 2; arm++) for (let t = 0; t < 70; t++) { const th = t / 70 * 5.5 + arm * Math.PI, rr = gr * .12 * Math.exp(th * .33); if (rr > gr) break; const c = t % 3 ? P.d : P.h; f.fillStyle = `rgba(${c},${.35 * (1 - rr / gr)})`; f.beginPath(); f.arc(Math.cos(th) * rr + (r() - .5) * 2, Math.sin(th) * rr + (r() - .5) * 2, 1.1 + r() * 1.6, 0, 7); f.fill(); }
+    f.restore(); }
+  { const sx = r() * BW, sy = r() * BH * .6, c = P.h; const sg = f.createRadialGradient(sx, sy, 0, sx, sy, 60); sg.addColorStop(0, 'rgba(255,255,255,.95)'); sg.addColorStop(.06, `rgba(${c},.7)`); sg.addColorStop(.3, `rgba(${c},.12)`); sg.addColorStop(1, `rgba(${c},0)`); f.fillStyle = sg; f.beginPath(); f.arc(sx, sy, 60, 0, 7); f.fill();
+    f.strokeStyle = 'rgba(255,255,255,.35)'; f.lineWidth = .8; f.beginPath(); f.moveTo(sx - 34, sy); f.lineTo(sx + 34, sy); f.moveTo(sx, sy - 22); f.lineTo(sx, sy + 22); f.stroke(); }
+  { const side = r() < .5 ? -1 : 1, pr = Math.min(BW, BH) * (.32 + r() * .12), px = side < 0 ? -pr * .45 : BW + pr * .45, py = BH * (.55 + r() * .35), c = P.b, l = Math.atan2(BH * .1 - py, BW * .5 - px);
+    f.save(); f.globalAlpha = .55; const pg = f.createRadialGradient(px + Math.cos(l) * pr * .5, py + Math.sin(l) * pr * .5, pr * .1, px, py, pr); pg.addColorStop(0, `rgb(${c.map(v => Math.min(255, v + 60))})`); pg.addColorStop(.7, `rgb(${c.map(v => v * .35 | 0)})`); pg.addColorStop(1, 'rgb(4,3,10)');
+    f.fillStyle = pg; f.beginPath(); f.arc(px, py, pr, 0, 7); f.fill(); f.save(); f.beginPath(); f.arc(px, py, pr, 0, 7); f.clip();
+    for (let k = 0; k < 8; k++) { f.fillStyle = `rgba(255,255,255,${.03 + r() * .05})`; f.fillRect(px - pr, py - pr + r() * pr * 2, pr * 2, pr * (.03 + r() * .08)); } f.restore();
+    f.globalAlpha = .8; f.strokeStyle = `rgba(${P.h},.35)`; f.lineWidth = 3; f.beginPath(); f.arc(px, py, pr * 1.01, l - 1.2, l + 1.2); f.stroke(); f.restore(); }
+  // star layers (parallax)
+  const layersN = [0.6, 1, 1.6].map((sz, li) => { const [c, x] = mk(W + 80, H + 80);
+    for (let i = 0; i < [300, 120, 42][li]; i++) { const sx = r() * (W + 80), sy = r() * (H + 80), a = 0.3 + r() * 0.7, tint = ['255,255,255', '199,210,254', '254,243,199', P.d.join(',')][Math.floor(r() * 4)]; x.fillStyle = `rgba(${tint},${a})`; x.beginPath(); x.arc(sx, sy, sz * (0.5 + r()), 0, 7); x.fill();
+      if (li === 2 && r() < .4) { x.strokeStyle = `rgba(${tint},${a * .35})`; x.lineWidth = .6; x.beginPath(); x.moveTo(sx - 5, sy); x.lineTo(sx + 5, sy); x.moveTo(sx, sy - 5); x.lineTo(sx, sy + 5); x.stroke(); } }
+    return c; });
+  const tw = Array.from({ length: 50 }, () => ({ x: r() * W, y: r() * H, p: r() * 6.28, s: 0.6 + r() * 1.4, f: .6 + r() * 2.5, c: r() < .3 ? P.h.join(',') : '255,255,255' }));
+  return { base, far, layers: layersN, tw, P, M };
 }
+function ensureBG(key) { if (key === bgKey && bgSet) return; bgKey = key; bgSet = bgCache[key] || (bgCache[key] = buildBGSet(key)); bg = bgSet.base; layers = bgSet.layers; twinkles = bgSet.tw;
+  const r = rng(key + 5); dust = Array.from({ length: qLevel === 0 ? 0 : qLevel === 2 ? 46 : 28 }, () => ({ x: r() * W, y: r() * H, z: .3 + r() * .7, s: 6 + r() * 22, vx: (r() - .5) * 6, vy: (r() - .5) * 4, a: .03 + r() * .06 })); comets = []; }
+function buildBG() { bgCache = {}; const k = bgKey < 0 ? 5 : bgKey; bgKey = -1; ensureBG(k); }
 function resize() {
   const dpr = window.devicePixelRatio || 1; W = innerWidth; H = innerHeight;
   qLevel = save.set.q === 'low' ? 0 : save.set.q === 'high' ? 2 : autoQ;
@@ -73,20 +113,36 @@ function resize() {
 addEventListener('resize', resize); resize();
 let parX = 0, parY = 0;
 function drawBG(t) {
-  ctx.drawImage(bg, 0, 0, W, H);
-  layers.forEach((L, i) => { const k = [6, 14, 26][i]; const oy = ((camWY * SC * [0.05, 0.1, 0.2][i]) % (H)); ctx.drawImage(L, -40 - parX * k, -40 - parY * k - oy, W + 80, H + 80); ctx.drawImage(L, -40 - parX * k, -40 - parY * k - oy + H, W + 80, H + 80); });
-  for (const s of twinkles) { const a = 0.35 + 0.65 * Math.abs(Math.sin(t * s.f + s.p)); ctx.fillStyle = `rgba(255,255,255,${a})`; ctx.beginPath(); ctx.arc(s.x, s.y, s.s, 0, 7); ctx.fill(); }
+  const B = bgSet, M = B.M, P = B.P, dtb = Math.min(.05, t - (drawBG.t || t)); drawBG.t = t;
+  const cy = camWY * SC; // world scroll on tall boss maps
+  const drift = Math.sin(t * .021) * 10, driftY = Math.cos(t * .017) * 8;
+  ctx.drawImage(B.base, -M - parX * 3 + drift, -M - (cy * .02) % M + driftY, W + M * 2, H + M * 2);
+  ctx.drawImage(B.far, -M - parX * 7 + drift * .6, -M - (cy * .04) % M, W + M * 2, H + M * 2);
+  // drifting dust clouds
+  if (dust.length) { for (const d of dust) { d.x += d.vx * dtb; d.y += d.vy * dtb; if (d.x < -40) d.x += W + 80; if (d.x > W + 40) d.x -= W + 80; if (d.y < -40) d.y += H + 80; if (d.y > H + 40) d.y -= H + 80;
+    const x = d.x - parX * 18 * d.z, y = ((d.y - cy * .15 * d.z) % (H + 80) + H + 80) % (H + 80) - 40; const gg = ctx.createRadialGradient(x, y, 0, x, y, d.s); gg.addColorStop(0, `rgba(${P.d},${d.a})`); gg.addColorStop(1, `rgba(${P.d},0)`); ctx.fillStyle = gg; ctx.fillRect(x - d.s, y - d.s, d.s * 2, d.s * 2); } }
+  layers.forEach((Ly, i) => { const k = [6, 14, 26][i]; const oy = ((cy * [0.05, 0.1, 0.2][i]) % (H)); ctx.drawImage(Ly, -40 - parX * k, -40 - parY * k - oy, W + 80, H + 80); ctx.drawImage(Ly, -40 - parX * k, -40 - parY * k - oy + H, W + 80, H + 80); });
+  for (const s of twinkles) { const a = 0.25 + 0.75 * Math.pow(Math.abs(Math.sin(t * s.f + s.p)), 3); ctx.fillStyle = `rgba(${s.c},${a})`; ctx.beginPath(); ctx.arc(s.x, s.y, s.s * (0.7 + a * .5), 0, 7); ctx.fill();
+    if (a > .9 && s.s > 1.4) { ctx.strokeStyle = `rgba(${s.c},${(a - .9) * 4})`; ctx.lineWidth = .6; ctx.beginPath(); ctx.moveTo(s.x - 6, s.y); ctx.lineTo(s.x + 6, s.y); ctx.moveTo(s.x, s.y - 6); ctx.lineTo(s.x, s.y + 6); ctx.stroke(); } }
+  // comets & shooting stars
+  if (qLevel > 0) { cometT -= dtb; if (cometT <= 0) { cometT = 3.5 + Math.random() * 6; const big = Math.random() < .35, a = .4 + Math.random() * .9 + (Math.random() < .5 ? 0 : Math.PI - 1.7), sp = big ? 90 + Math.random() * 60 : 420 + Math.random() * 300;
+      comets.push({ x: Math.random() * W, y: Math.random() * H * .5, vx: Math.cos(a) * sp, vy: Math.abs(Math.sin(a)) * sp, l: big ? 5 : .7, L0: big ? 5 : .7, big }); }
+    for (let i = comets.length - 1; i >= 0; i--) { const c = comets[i]; c.x += c.vx * dtb; c.y += c.vy * dtb; c.l -= dtb; if (c.l <= 0) { comets.splice(i, 1); continue; }
+      const f = Math.sin(Math.PI * (1 - c.l / c.L0)), tl = c.big ? 70 : 90, n = Math.hypot(c.vx, c.vy), tx = c.x - c.vx / n * tl, ty = c.y - c.vy / n * tl;
+      const cg = ctx.createLinearGradient(c.x, c.y, tx, ty); cg.addColorStop(0, `rgba(255,255,255,${.85 * f})`); cg.addColorStop(.25, `rgba(${P.h},${.4 * f})`); cg.addColorStop(1, `rgba(${P.h},0)`);
+      ctx.strokeStyle = cg; ctx.lineWidth = c.big ? 2.4 : 1.2; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(c.x, c.y); ctx.lineTo(tx, ty); ctx.stroke(); ctx.lineCap = 'butt';
+      if (c.big) glow(c.x, c.y, 7, 'rgba(224,242,254,A)', .7 * f); } }
 }
 
 // ---------- state ----------
 let state = 'menu', li = 0, L = null, ship = null, launchesLeft = 0, collected = new Set(), clock = 0, started = false;
 let braking = false, trail = [], attempt = [], ghost = null, parts = [], pops = [], shake = 0, aim = null, preview = [], tf = 1, animT = 0, curSector = 0, thrust = 0;
-let active = {}, scanArmed = false, shieldOn = false, slowT = 0, heartT = 0, pressT = -1, lastTick = 0, ghostLevel = -1;
+let active = {}, scanArmed = false, shieldOn = false, slowT = 0, heartT = 0, press = null, aimId = null, launchT = -1e9, flySteps = 0, lastTick = 0, ghostLevel = -1;
 
 function startLevel(i, keepGhost) {
   if (!keepGhost || ghostLevel !== i) { ghost = null; }
-  li = i; L = S.prep(LEVELS[i]); ship = S.newShip(L); ship.ang = -Math.PI / 2;
-  launchesLeft = L.L; collected = new Set(); clock = 0; started = false; braking = false; pressT = -1;
+  li = i; ensureBG(SECTORS[CAT.secOf[i]].pal); L = S.prep(LEVELS[i]); ship = S.newShip(L); ship.ang = -Math.PI / 2;
+  launchesLeft = L.L; collected = new Set(); clock = 0; started = false; resetInput();
   trail = []; attempt = []; parts = []; pops = []; aim = null; preview = []; tf = 1; active = {}; scanArmed = false; shieldOn = false; slowT = 0;
   planetCache = {}; camWY = clampCam(ship.y); Z = 1; camCX = 180; camCY = camWY + 320; fl = { bounces: 0, margin: 1e9 }; AU.aimEnd(); state = 'aim'; show(null); $('hud').style.display = 'flex'; $('hTime').textContent = '0.0';
   $('hLevel').textContent = `${i + 1}. ${L.n}`; $('hTarget').textContent = L.t3 ? `3★ ≤ ${L.t3}с` : '';
@@ -124,9 +180,27 @@ function show(id) { document.querySelectorAll('.scr').forEach(e => e.classList.r
 
 // ---------- input ----------
 function wpos(e) { return { x: camCX + ((e.clientX - OX) / SC - 180) / Z, y: camCY + ((e.clientY - OY) / SC - 320) / Z }; }
-function aimVec() { const dx = aim.sx - aim.x, dy = aim.sy - aim.y, d = Math.hypot(dx, dy); const pull = Math.min(d, S.MAX_PULL); return { a: Math.atan2(dy, dx), p: pull, pct: Math.round(pull / S.MAX_PULL * 100) }; }
+const wrapA = a => Math.atan2(Math.sin(a), Math.cos(a));
+const AIM_DEAD = 12, AIM_SLOW = 70, AIM_FINE = 0.35;
+// Angle model: the angle follows the drag direction only beyond a dead zone; slow finger motion = fine adjust (35% gain);
+// fast motion re-syncs toward the finger direction; the displayed/launched angle is low-pass filtered (~70 ms). Power = drag length only.
+function aimMove(p, now) {
+  const dt = Math.max(1, now - (aim.lt || now - 16)) / 1000, sp = Math.hypot(p.x - aim.x, p.y - aim.y) / dt; aim.x = p.x; aim.y = p.y; aim.lt = now;
+  const dx = aim.sx - aim.x, dy = aim.sy - aim.y, d = Math.hypot(dx, dy); if (d < AIM_DEAD) return;
+  const raw = Math.atan2(dy, dx);
+  if (aim.tgt == null) { aim.tgt = raw; aim.ang = raw; aim.raw = raw; return; }
+  const dRaw = wrapA(raw - aim.raw); aim.raw = raw;
+  const fine = sp < AIM_SLOW; aim.fine = fine;
+  aim.tgt = wrapA(aim.tgt + dRaw * (fine ? AIM_FINE : 1));
+  if (!fine) aim.tgt = wrapA(aim.tgt + wrapA(raw - aim.tgt) * 0.25);
+}
+function aimSmooth(dt) { if (!aim || aim.tgt == null) return; const e = wrapA(aim.tgt - aim.ang); aim.ang = Math.abs(e) < 0.002 ? aim.tgt : wrapA(aim.ang + e * Math.min(1, dt * 14)); }
+function aimVec() { const dx = aim.sx - aim.x, dy = aim.sy - aim.y, d = Math.hypot(dx, dy); const pull = Math.min(d, S.MAX_PULL);
+  if (aim.ang != null) return { a: aim.ang, p: pull, pct: Math.round(pull / S.MAX_PULL * 100) };
+  return { a: Math.atan2(dy, dx), p: pull, pct: Math.round(pull / S.MAX_PULL * 100) }; }
 function launch(a, p) {
   const sp = S.launchSpeed(p); ship.vx = Math.cos(a) * sp; ship.vy = Math.sin(a) * sp;
+  resetInput(); launchT = performance.now(); flySteps = 0;
   launchesLeft--; started = true; state = 'fly'; aim = null; thrust = 0.35; ship.scan = scanArmed; preview = []; scanArmed = false;
   if (active.slow && !active.slowUsed) { slowT = 3; active.slowUsed = 1; }
   for (let i = 0; i < 18; i++) spark(ship.x, ship.y, '#22d3ee', 60 + Math.random() * 90, a + Math.PI + (Math.random() - .5) * 1.2);
@@ -134,28 +208,46 @@ function launch(a, p) {
   if (li === 0) { save.tut.aim = 1; persist(); }
   HAP.launch(); AU.launch(p / S.MAX_PULL * 100); save.stats.launches++; hud();
 }
+// Input model (v3.1.1):
+//  - aiming is bound to the pointer id that started it; other pointers are ignored
+//  - brake/tap during flight needs a NEW press that starts >= BRAKE_GRACE ms after launch; the aim gesture's pointer never brakes
+//  - all press/brake state is reset on launch, stop, level start/end, pointercancel, blur and visibility change
+const BRAKE_GRACE = 150, HOLD_MS = 160;
+function resetInput() { press = null; aimId = null; braking = false; }
 cv.addEventListener('pointerdown', e => {
   e.preventDefault();
-  if (state === 'fly') { pressT = performance.now(); return; }
-  if (state !== 'aim') return;
-  const p = wpos(e); aim = { sx: p.x, sy: p.y, x: p.x, y: p.y, lastPct: 0 }; $('hand').style.display = 'none'; AU.aimStart();
+  if (state === 'fly') {
+    if (press || e.pointerId === aimId) return;                       // multi-touch / leftover aim pointer
+    if (performance.now() - launchT < BRAKE_GRACE) return;            // too soon after launch: not a brake press
+    press = { id: e.pointerId, t: performance.now() }; return;
+  }
+  if (state !== 'aim' || aim) return;
+  aimId = e.pointerId; try { cv.setPointerCapture(e.pointerId); } catch (_) {}
+  const z = SC * Z, p = { x: e.clientX / z, y: e.clientY / z }; aim = { z, sx: p.x, sy: p.y, x: p.x, y: p.y, lastPct: 0 }; // screen-space drag (immune to camera easing) $('hand').style.display = 'none'; AU.aimStart();
 });
 cv.addEventListener('pointermove', e => {
-  if (state !== 'aim' || !aim) return; const p = wpos(e); aim.x = p.x; aim.y = p.y;
+  if (state !== 'aim' || !aim || e.pointerId !== aimId) return; aimMove({ x: e.clientX / aim.z, y: e.clientY / aim.z }, performance.now());
   const v = aimVec(); AU.aimPower(v.pct); const step = Math.floor(v.pct / 10); if (step !== aim.lastPct) { aim.lastPct = step; HAP.tick(); }
-  preview = (scanArmed && v.p > 3) ? computePreview(v.a, v.p) : [];
 });
-const up = () => {
-  if (state === 'fly') {
-    const held = pressT >= 0 ? performance.now() - pressT : 0; pressT = -1;
-    if (!braking && held < 160 && L.magnets.length) { ship.flip = -ship.flip; HAP.magnet(); AU.magnet(ship.flip); save.stats.flips++; achCheck(); burst(ship.x, ship.y, ship.flip > 0 ? '#f87171' : '#60a5fa', 12); }
-    braking = false; hud(); return;
+const up = e => {
+  if (press && e.pointerId === press.id) {
+    const held = performance.now() - press.t, wasBraking = braking; press = null; braking = false;
+    if (state === 'fly' && !wasBraking && held < HOLD_MS && L.magnets.length) { ship.flip = -ship.flip; HAP.magnet(); AU.magnet(ship.flip); save.stats.flips++; achCheck(); burst(ship.x, ship.y, ship.flip > 0 ? '#f87171' : '#60a5fa', 12); }
+    if (L) hud(); return;
   }
-  if (state !== 'aim' || !aim) return;
+  if (e.pointerId !== aimId) return;
+  aimId = null;
+  if (state !== 'aim' || !aim) { aim = null; return; }
   const v = aimVec(); if (v.p < 6) { aim = null; preview = []; AU.aimEnd(); return; }
   launch(v.a, v.p);
 };
-cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', up);
+const cancel = e => {
+  if (press && e.pointerId === press.id) { press = null; braking = false; if (L) hud(); }
+  if (e.pointerId === aimId) { aimId = null; aim = null; preview = []; AU.aimEnd(); }
+};
+addEventListener('pointerup', up); addEventListener('pointercancel', cancel); cv.addEventListener('lostpointercapture', e => { if (e.pointerId === aimId) up(e); });
+addEventListener('blur', () => { cancel({ pointerId: press ? press.id : -99 }); if (aim) cancel({ pointerId: aimId }); });
+document.addEventListener('visibilitychange', () => { if (document.hidden) { if (press) cancel({ pointerId: press.id }); if (aim) cancel({ pointerId: aimId }); } });
 function computePreview(a, p) {
   const sp = S.launchSpeed(p); const o = Object.assign({}, ship, { vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, fuel: 0 }); const pts = [];
   for (let i = 0; i < 700; i++) { S.step(o, L, null); if (i % 6 === 0) pts.push([o.x, o.y]); if (S.status(o, L)) { pts.push([o.x, o.y]); break; } }
@@ -168,7 +260,7 @@ function burst(x, y, col, n) { for (let i = 0; i < n; i++) spark(x, y, col); }
 
 // ---------- tick ----------
 function tick() {
-  clock += S.STEP;
+  clock += S.STEP; flySteps++;
   const ev = S.step(ship, L, { brake: braking && ship.fuel > 0 });
   tf = ev.tf;
   const stt = save.stats; stt.flight += S.STEP; if (tf < 0.6) stt.dilate += S.STEP;
@@ -190,9 +282,9 @@ function tick() {
     if (shieldOn) { shieldOn = false; deflect(st); hud(); return; }
     return fail({ swallowed: 'Шатл перетнув горизонт подій.', moon: 'Зіткнення з місяцем!', flare: 'Шатл згорів у сонячному спалаху.', oob: 'Шатл відлетів у відкритий космос.' }[st] || 'Загибель', st);
   }
-  if (braking && Math.hypot(ship.vx, ship.vy) < S.STOP_SPEED) {
+  if (braking && flySteps > 18 && Math.hypot(ship.vx, ship.vy) < S.STOP_SPEED) {
     ship.vx = 0; ship.vy = 0; braking = false; burst(ship.x, ship.y, '#fb923c', 14); HAP.stop(); AU.stop();
-    if (launchesLeft > 0) { state = 'aim'; const h = $('hint'); h.innerHTML = '🛑 Зупинка! Цілься знову — <b>ще ' + launchesLeft + '</b>'; h.style.display = 'block'; }
+    if (launchesLeft > 0) { press = null; braking = false; aim = null; aimId = null; state = 'aim'; const h = $('hint'); h.innerHTML = '🛑 Зупинка! Цілься знову — <b>ще ' + launchesLeft + '</b>'; h.style.display = 'block'; }
     else fail('Шатл зупинився, а запусків більше немає.', 'stranded');
     hud();
   }
@@ -209,25 +301,25 @@ function deflect(st) {
 }
 function starsFor(t) { return !L.t3 ? 3 : t <= L.t3 ? 3 : t <= L.t2 ? 2 : 1; }
 function win() {
-  state = 'result'; burst(L.portal[0], L.portal[1], '#22d3ee', 50); $('hud').style.display = 'none'; $('hint').style.display = 'none'; ghost = null;
+  resetInput(); state = 'result'; burst(L.portal[0], L.portal[1], '#22d3ee', 50); $('hud').style.display = 'none'; $('hint').style.display = 'none'; ghost = null;
   const t = clock, st = starsFor(t), timePts = Math.max(0, Math.round(((L.t2 || 20) - t) * 100)), bon = collected.size * 250, unused = launchesLeft * 300;
   const score = st * 1000 + timePts + bon + unused;
-  const prev = save.best[li] || { s: 0, sc: 0 }; const isBest = score > prev.sc; const rk0 = PR.rank(PR.stars(save));
-  save.best[li] = { s: Math.max(prev.s, st), sc: Math.max(prev.sc, score), t: Math.min(prev.t || 1e9, +t.toFixed(2)) };
+  const prev = bestOf(li) || { s: 0, sc: 0 }; const isBest = score > prev.sc; const rk0 = PR.rank(PR.stars(save));
+  save.best[LID(li)] = { s: Math.max(prev.s, st), sc: Math.max(prev.sc, score), t: Math.min(prev.t || 1e9, +t.toFixed(2)) };
   save.stats.wins++; AU.win(st);
-  save.unlocked = Math.max(save.unlocked, Math.min(LEVELS.length, li + 2));
+  { const nx = CAT.nextIndex(li); if (nx != null && CAT.secOf[nx] === CAT.secOf[li]) save.open[LID(nx)] = 1; }
   let streakMsg = '';
   if (st === 3) { save.streak++; if (save.streak % 4 === 0) streakMsg = grant(`Серія ${save.streak}× ★★★`); else streakMsg = `Серія ★★★: ${save.streak % 4}/4 до бонусу`; }
   else { save.streak = 0; streakMsg = 'Серію ★★★ скинуто'; }
-  if (L.boss && !save.ach['boss' + li]) { save.ach['boss' + li] = 1; streakMsg += '<br>' + grant('Бос переможений'); }
+  if (L.boss && !save.ach['boss:' + LID(li)]) { save.ach['boss:' + LID(li)] = 1; streakMsg += '<br>' + grant('Бос переможений'); }
   const rk1 = PR.rank(PR.stars(save)); if (rk1.i > rk0.i) streakMsg += `<br>🎖 Новий ранг: <b>${rk1.name}</b>!`;
   achCheck({ type: 'win', bonus: collected.size, margin: fl.margin, bounces: fl.bounces, time: t });
   persist();
   $('rTitle').textContent = st === 3 ? 'Ідеально!' : st === 2 ? 'Чудово!' : 'Портал досягнуто';
   $('rStars').innerHTML = [0, 1, 2].map(k => `<span class="${k < st ? '' : 'e'}">★</span>`).join('');
   $('rRows').innerHTML = `<div><span>⏱ ${t.toFixed(1)}с (3★ ≤ ${L.t3}с, 2★ ≤ ${L.t2}с)</span></div><div><span>Рейтинг ${st}×1000</span><b>${st * 1000}</b></div><div><span>Бонус за час</span><b>${timePts}</b></div><div><span>Бонусні зірки ${collected.size}×250</span><b>${bon}</b></div><div><span>Запуски в запасі ${launchesLeft}×300</span><b>${unused}</b></div>`;
-  $('rScore').textContent = score; $('rTotal').textContent = `Загальний рахунок: ${PR.score(save)} · ${rk1.name}`; $('rBest').textContent = isBest ? '🏆 Новий рекорд!' : `Рекорд: ${save.best[li].sc}`; $('rStreak').innerHTML = streakMsg;
-  $('bNext').style.display = li + 1 < LEVELS.length ? '' : 'none';
+  $('rScore').textContent = score; $('rTotal').textContent = `Загальний рахунок: ${PR.score(save)} · ${rk1.name}`; $('rBest').textContent = isBest ? '🏆 Новий рекорд!' : `Рекорд: ${bestOf(li).sc}`; $('rStreak').innerHTML = streakMsg;
+  $('bNext').style.display = CAT.nextIndex(li) != null && isOpen(li + 1) ? '' : 'none';
   setTimeout(() => { if (state === 'result') show('result'); }, 450);
 }
 function grant(why) {
@@ -236,7 +328,7 @@ function grant(why) {
   return `🎁 ${why}: отримано ${PU[k].i} ${PU[k].n}!`;
 }
 function fail(msg, why) {
-  state = 'fail'; burst(ship.x, ship.y, '#ef4444', 40); shake = 14; HAP.death(); AU.lose();
+  resetInput(); state = 'fail'; burst(ship.x, ship.y, '#ef4444', 40); shake = 14; HAP.death(); AU.lose();
   save.stats.fails++; save.stats.deaths[why || 'other'] = (save.stats.deaths[why || 'other'] || 0) + 1; achCheck({ type: 'fail' }); persist(); $('hud').style.display = 'none'; $('hint').style.display = 'none';
   ghost = attempt.slice(); ghostLevel = li;
   $('fText').textContent = msg; setTimeout(() => { if (state === 'fail') show('fail'); }, 500);
@@ -443,16 +535,48 @@ function drawAim() {
   if (!aim) { const p = (Math.sin(animT * 4) + 1) / 2; ctx.strokeStyle = `rgba(34,211,238,${.3 + p * .4})`; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(x, y, R(18 + p * 6), 0, 7); ctx.stroke(); return; }
   const v = aimVec();
   preview.forEach((p, i) => { const a = 1 - i / preview.length; ctx.fillStyle = `rgba(103,232,249,${.85 * a})`; ctx.beginPath(); ctx.arc(X(p[0]), Y(p[1]), R(1.2 + 2 * a), 0, 7); ctx.fill(); });
-  // short direction stub from nose
-  const len = (L.stub === 2 ? 64 : 34) * (0.5 + v.pct / 200); const nx = ship.x + Math.cos(v.a) * 14, ny = ship.y + Math.sin(v.a) * 14, ex = nx + Math.cos(v.a) * len, ey = ny + Math.sin(v.a) * len;
-  ctx.strokeStyle = '#e9d5ff'; ctx.lineWidth = R(2.5); ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(X(nx), Y(ny)); ctx.lineTo(X(ex), Y(ey)); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(X(ex), Y(ey)); ctx.lineTo(X(ex - Math.cos(v.a - .45) * 9), Y(ey - Math.sin(v.a - .45) * 9)); ctx.moveTo(X(ex), Y(ey)); ctx.lineTo(X(ex - Math.cos(v.a + .45) * 9), Y(ey - Math.sin(v.a + .45) * 9)); ctx.stroke(); ctx.lineCap = 'butt';
-  const bx = ship.x - Math.cos(v.a) * v.p * 0.6, by = ship.y - Math.sin(v.a) * v.p * 0.6;
-  ctx.strokeStyle = 'rgba(233,213,255,.45)'; ctx.lineWidth = 1.5; ctx.setLineDash([4, 4]); ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(X(bx), Y(by)); ctx.stroke(); ctx.setLineDash([]);
-  const col = v.pct > 85 ? '#f43f5e' : v.pct > 50 ? '#fbbf24' : '#34d399';
-  ctx.strokeStyle = col; ctx.lineWidth = R(3); ctx.beginPath(); ctx.arc(x, y, R(26), -Math.PI / 2, -Math.PI / 2 + v.pct / 100 * 6.283); ctx.stroke();
-  ctx.fillStyle = col; ctx.font = `bold ${R(15)}px sans-serif`; ctx.textAlign = 'center'; ctx.fillText(v.pct + '%', x, y + R(46));
-  ctx.font = `${R(10)}px sans-serif`; ctx.fillStyle = '#c4b5fd'; ctx.fillText(Math.round((-v.a * 180 / Math.PI + 360) % 360) + '°', x, y + R(58)); ctx.textAlign = 'left';
+  // short cosmic beam from the nose (same short length as the old stub — not a trajectory)
+  if (aim.ang == null) { const p = (Math.sin(animT * 6) + 1) / 2; ctx.strokeStyle = `rgba(233,213,255,${.25 + p * .3})`; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(x, y, R(22), 0, 7); ctx.stroke(); }
+  const k = v.pct / 100, col = powerCol(k);
+  // power ring
+  ctx.lineCap = 'round'; ctx.strokeStyle = 'rgba(255,255,255,.08)'; ctx.lineWidth = R(3); ctx.beginPath(); ctx.arc(x, y, R(21), 0, 7); ctx.stroke();
+  const pc = ctx.globalCompositeOperation; ctx.globalCompositeOperation = 'lighter';
+  ctx.strokeStyle = `rgba(${col},.35)`; ctx.lineWidth = R(6); ctx.beginPath(); ctx.arc(x, y, R(21), -Math.PI / 2, -Math.PI / 2 + k * 6.283); ctx.stroke();
+  ctx.strokeStyle = `rgb(${col})`; ctx.lineWidth = R(2.2); ctx.beginPath(); ctx.arc(x, y, R(21), -Math.PI / 2, -Math.PI / 2 + k * 6.283); ctx.stroke(); ctx.globalCompositeOperation = pc; ctx.lineCap = 'butt';
+  ctx.fillStyle = `rgb(${col})`; ctx.font = `bold ${R(15)}px sans-serif`; ctx.textAlign = 'center'; ctx.fillText(v.pct + '%', x, y + R(46));
+  ctx.font = `${R(10)}px sans-serif`; ctx.fillStyle = aim.fine ? '#fde68a' : '#c4b5fd'; ctx.fillText((aim.ang != null ? Math.round((-v.a * 180 / Math.PI + 360) % 360) + '°' : '') + (aim.fine ? ' · точно' : ''), x, y + R(58)); ctx.textAlign = 'left';
+}
+function powerCol(k) { // teal -> violet -> gold -> rose
+  const st = [[0, [94, 234, 212]], [.45, [167, 139, 250]], [.75, [253, 224, 71]], [1, [251, 113, 133]]]; let i = 0; while (i < st.length - 2 && k > st[i + 1][0]) i++;
+  const [k0, c0] = st[i], [k1, c1] = st[i + 1], f = Math.max(0, Math.min(1, (k - k0) / (k1 - k0))); return c0.map((c, j) => Math.round(c + (c1[j] - c) * f)).join(',');
+}
+let beamParts = [];
+function drawBeam(v) {
+  const k = v.pct / 100, col = powerCol(k), a = v.a, ca = Math.cos(a), sa = Math.sin(a);
+  const len = (L.stub === 2 ? 64 : 34) * (0.5 + v.pct / 200), x0 = ship.x + ca * 10, y0 = ship.y + sa * 10, x1 = x0 + ca * len, y1 = y0 + sa * len;
+  const px = -sa, py = ca, w0 = 5.5 + k * 3, fl = 1 + Math.sin(animT * 22) * .06 + Math.sin(animT * 37) * .04;
+  const pc = ctx.globalCompositeOperation; ctx.globalCompositeOperation = 'lighter';
+  // outer plume (soft, tapered)
+  const plume = (w, alpha) => { const g = ctx.createLinearGradient(X(x0), Y(y0), X(x1), Y(y1)); g.addColorStop(0, `rgba(${col},${alpha})`); g.addColorStop(.7, `rgba(${col},${alpha * .45})`); g.addColorStop(1, `rgba(${col},0)`);
+    ctx.fillStyle = g; ctx.beginPath(); ctx.moveTo(X(x0 + px * w), Y(y0 + py * w)); ctx.quadraticCurveTo(X(x0 + ca * len * .55 + px * w * .8), Y(y0 + sa * len * .55 + py * w * .8), X(x1), Y(y1));
+    ctx.quadraticCurveTo(X(x0 + ca * len * .55 - px * w * .8), Y(y0 + sa * len * .55 - py * w * .8), X(x0 - px * w), Y(y0 - py * w)); ctx.closePath(); ctx.fill(); };
+  plume(w0 * 2.2 * fl, .16); plume(w0 * fl, .45); plume(w0 * .38, .95);
+  // hot white core
+  const cg = ctx.createLinearGradient(X(x0), Y(y0), X(x1), Y(y1)); cg.addColorStop(0, 'rgba(255,255,255,.95)'); cg.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.strokeStyle = cg; ctx.lineWidth = R(1.4); ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(X(x0), Y(y0)); ctx.lineTo(X(x0 + ca * len * .85), Y(y0 + sa * len * .85)); ctx.stroke(); ctx.lineCap = 'butt';
+  // tip spark
+  const tx = x0 + ca * len * .82, ty = y0 + sa * len * .82; glow(X(tx), Y(ty), R(7 + k * 5), `rgba(${col},A)`, .55);
+  ctx.strokeStyle = 'rgba(255,255,255,.7)'; ctx.lineWidth = 1; ctx.beginPath(); const sp = R(4 + k * 3) * (0.8 + Math.sin(animT * 9) * .2);
+  ctx.moveTo(X(tx) - sp, Y(ty)); ctx.lineTo(X(tx) + sp, Y(ty)); ctx.moveTo(X(tx), Y(ty) - sp); ctx.lineTo(X(tx), Y(ty) + sp); ctx.stroke();
+  // sparkles streaming along the beam
+  const n = qLevel === 0 ? 1 : 2; for (let q = 0; q < n; q++) beamParts.push({ f: Math.random() * .2, o: (Math.random() - .5) * w0 * 1.4, v: .9 + Math.random() * 1.4, l: 1, s: .6 + Math.random() * 1.4 });
+  for (let i = beamParts.length - 1; i >= 0; i--) { const b = beamParts[i]; b.f += b.v * 0.016; b.l -= 0.028; b.o *= .985; if (b.f > 1.15 || b.l <= 0) { beamParts.splice(i, 1); continue; }
+    const bx = x0 + ca * len * b.f + px * b.o * (1 - b.f * .6), by = y0 + sa * len * b.f + py * b.o * (1 - b.f * .6); ctx.fillStyle = `rgba(${b.f > .6 ? '255,255,255' : col},${b.l * (1.1 - b.f)})`; ctx.beginPath(); ctx.arc(X(bx), Y(by), R(b.s * .7), 0, 7); ctx.fill(); }
+  if (beamParts.length > 90) beamParts.splice(0, beamParts.length - 90);
+  ctx.globalCompositeOperation = pc;
+  // faint pull band (shows drag, not the path)
+  const bx = ship.x - ca * v.p * 0.45, by = ship.y - sa * v.p * 0.45; const pg = ctx.createLinearGradient(X(ship.x), Y(ship.y), X(bx), Y(by)); pg.addColorStop(0, `rgba(${col},.35)`); pg.addColorStop(1, `rgba(${col},0)`);
+  ctx.strokeStyle = pg; ctx.lineWidth = R(1.6); ctx.setLineDash([2, 5]); ctx.beginPath(); ctx.moveTo(X(ship.x), Y(ship.y)); ctx.lineTo(X(bx), Y(by)); ctx.stroke(); ctx.setLineDash([]);
 }
 function drawFX(dt) {
   ctx.globalCompositeOperation = 'lighter';
@@ -484,7 +608,7 @@ let last = performance.now(), acc = 0, frozen = false;
 function frame(now) {
   const dt = Math.min(0.05, (now - last) / 1000); last = now; animT += dt;
   if (L && state === 'fly') {
-    if (pressT >= 0 && !braking && L.stops && ship.fuel > 0 && now - pressT >= 160) { braking = true; hud(); }
+    if (press && !braking && L.stops && ship.fuel > 0 && now - press.t >= HOLD_MS) { braking = true; hud(); }
     let sdt = dt; if (slowT > 0) { slowT -= dt; sdt = dt * 0.35; }
     acc += sdt; while (acc >= S.STEP && state === 'fly' && !frozen) { tick(); acc -= S.STEP; }
     thrust = Math.max(0, thrust - dt); heartbeat(dt);
@@ -493,6 +617,7 @@ function frame(now) {
     hud();
   } else acc = 0;
   if (L && (state === 'aim' || state === 'fly')) save.stats.play += dt;
+  if (aim && state === 'aim') { aimSmooth(dt); if (scanArmed && aim.ang != null) { const v = aimVec(); if (v.p > 3 && (Math.abs(wrapA(v.a - (aim.pa ?? 99))) > 0.002 || Math.abs(v.p - (aim.pp ?? -1)) > 0.5)) { aim.pa = v.a; aim.pp = v.p; preview = computePreview(v.a, v.p); } } }
   if (L && started && state === 'aim') clock += dt;
   if (L && started) $('hTime').textContent = clock.toFixed(1);
   if (L && ship) { const tgt = clampCam(ship.y); camWY += (tgt - camWY) * Math.min(1, dt * 4); parX += (((ship.x - 180) / 180) - parX) * .05; }
@@ -526,7 +651,7 @@ function frame(now) {
     L.planets.forEach(drawPlanet); L.asteroids.forEach(drawAsteroid); L.gates.forEach(g => drawGate(g, animT)); L.worms.forEach((w, i) => drawWorm(w, animT, i));
     L.moons.forEach(m => drawMoon(m, t)); L.holes.forEach(h => drawHoleTop(h, t));
     drawPortal(animT); L.keys.forEach((k, i) => drawKey(k, i, animT)); L.stars.forEach((s, k) => drawStar(s, k, animT));
-    drawGhost(); drawTrail(); drawAim(); if (state !== 'fail') drawShuttle(); drawFX(dt); if (!useGL) drawSlowmo();
+    drawGhost(); drawTrail(); drawAim(); if (state !== 'fail') drawShuttle(); if (state === 'aim' && aim && aim.ang != null) drawBeam(aimVec()); drawFX(dt); if (!useGL) drawSlowmo();
   } else {
     drawHoleTop(MENU_HOLE, animT);
     if (!ship) ship = { x: 0, y: 0, vx: 0, vy: 0, t: 0, broken: 0, keys: 0, flip: 1 };
@@ -543,28 +668,37 @@ function frame(now) {
 requestAnimationFrame(frame);
 
 // ---------- menus ----------
-const secStars = s => { let n = 0; for (let i = s * 10; i < s * 10 + 10; i++) n += (save.best[i] || {}).s || 0; return n; };
+const secStars = k => SECTORS[k].ids.reduce((n, id) => n + ((save.best[id] || {}).s || 0), 0);
 const totalStars = () => Object.values(save.best).reduce((a, b) => a + b.s, 0);
+const SEC_PAGE = 5; let secPage = -1;
 function buildSectors() {
-  $('secList').innerHTML = ''; SECTORS.forEach((s, i) => {
-    const d = document.createElement('div'); const lock = save.unlocked < i * 10 + 1; d.className = 'sector' + (lock ? ' lock' : ''); d.style.borderColor = s.c;
-    d.innerHTML = `<b>${lock ? '🔒 ' : ''}${i + 1}. ${s.n}</b><small>${s.d}</small><div style="margin-top:4px;color:#fde047;font-size:13px">★ ${secStars(i)}/30</div>`;
-    d.onclick = () => { if (!lock) { curSector = i; buildLevels(); show('levels'); } }; $('secList').appendChild(d);
-  });
+  const pages = Math.max(1, Math.ceil(SECTORS.length / SEC_PAGE)); if (secPage < 0) { let last = 0; SECTORS.forEach((s, k) => { if (CAT.sectorOpen(save, k)) last = k; }); secPage = Math.floor(last / SEC_PAGE); }
+  secPage = Math.max(0, Math.min(pages - 1, secPage)); $('secList').innerHTML = '';
+  for (let i = secPage * SEC_PAGE; i < Math.min(SECTORS.length, (secPage + 1) * SEC_PAGE); i++) { const s = SECTORS[i];
+    const d = document.createElement('div'); const open = CAT.sectorOpen(save, i); d.className = 'sector' + (open ? '' : ' lock') + (s.soon ? ' soon' : ''); d.style.borderColor = s.c;
+    const st = s.soon ? '' : `<div style="margin-top:4px;color:#fde047;font-size:13px">★ ${secStars(i)}/${s.ids.length * 3}</div>`;
+    d.innerHTML = `<b>${open ? '' : s.soon ? '⏳ ' : '🔒 '}${i + 1}. ${s.n}${s.soon ? ' <span class="badge">СКОРО</span>' : ''}</b><small>${s.d}</small>${st}${open || s.soon ? '' : `<small class="lk">${CAT.lockText(s)}</small>`}`;
+    d.onclick = () => { if (open) { curSector = i; buildLevels(); show('levels'); } else toast(s.soon ? '⏳ Сектор у розробці — скоро!' : '🔒 ' + CAT.lockText(s), 1300); }; $('secList').appendChild(d);
+  }
+  $('secPager').style.display = pages > 1 ? 'flex' : 'none'; $('sPage').textContent = `${secPage + 1} / ${pages}`;
+  $('sDots').innerHTML = pages <= 12 ? Array.from({ length: pages }, (_, k) => `<i class="${k === secPage ? 'on' : ''}" data-p="${k}"></i>`).join('') : '';
+  $('sDots').querySelectorAll('i').forEach(e => e.onclick = () => { secPage = +e.dataset.p; buildSectors(); });
 }
+$('sPrev').onclick = () => { secPage--; buildSectors(); }; $('sNext').onclick = () => { secPage++; buildSectors(); };
+{ let sx = null; $('secList').addEventListener('touchstart', e => { sx = e.touches[0].clientX; }, { passive: true }); $('secList').addEventListener('touchend', e => { if (sx == null) return; const dx = e.changedTouches[0].clientX - sx; sx = null; if (Math.abs(dx) > 60) { secPage += dx < 0 ? 1 : -1; buildSectors(); } }); }
 function buildLevels() {
-  $('secTitle').textContent = `${curSector + 1}. ${SECTORS[curSector].n}`; $('grid').innerHTML = '';
-  for (let i = curSector * 10; i < curSector * 10 + 10 && i < LEVELS.length; i++) {
-    const b = document.createElement('button'); const lock = i + 1 > save.unlocked; const st = (save.best[i] || {}).s || 0;
+  const s = SECTORS[curSector]; $('secTitle').textContent = `${curSector + 1}. ${s.n}`; $('grid').innerHTML = '';
+  for (const i of s.idx) {
+    const b = document.createElement('button'); const lock = !isOpen(i); const st = (bestOf(i) || {}).s || 0;
     b.className = 'lv' + (lock ? ' lock' : '') + (LEVELS[i].boss ? ' boss' : ''); b.innerHTML = `${lock ? '🔒' : LEVELS[i].boss ? '☠' : i + 1}<span>${'★'.repeat(st)}${'☆'.repeat(3 - st)}</span>`;
     b.onclick = () => { if (!lock) startLevel(i); }; $('grid').appendChild(b);
   }
 }
-function toMenu() { state = 'menu'; L = null; ship = null; camWY = 0; Z = 1; camCX = 180; camCY = 320; AU.aimEnd(); persist();
+function toMenu() { resetInput(); ensureBG(5); state = 'menu'; L = null; ship = null; camWY = 0; Z = 1; camCX = 180; camCY = 320; AU.aimEnd(); persist();
   const stn = PR.stars(save), rk = PR.rank(stn);
   $('rank').innerHTML = `<b>${rk.name}</b><div class="bar"><i style="width:${rk.nextAt ? Math.round((stn - rk.at) / (rk.nextAt - rk.at) * 100) : 100}%"></i></div><span>${rk.next ? `до «${rk.next}»: ${rk.nextAt - stn} ★` : 'найвищий ранг'}</span>`;
   $('score').textContent = `Загальний рахунок: ${PR.score(save).toLocaleString('uk-UA')} · досягнення ${Object.keys(save.achv).length}/${PR.ACH.length}`; $('hud').style.display = 'none'; $('hint').style.display = 'none'; $('hand').style.display = 'none'; $('pu').style.display = 'none';
-  $('totalStars').textContent = `★ ${totalStars()}/150 · відкрито: ${save.unlocked}/${LEVELS.length}`;
+  $('totalStars').textContent = `★ ${totalStars()}/${CAT.maxStars} · відкрито: ${LEVELS.filter((_, i) => isOpen(i)).length}/${LEVELS.length}`;
   $('puInfo').textContent = `Бонуси: 🚀${save.pu.extra} 📡${save.pu.scan} 🛡${save.pu.shield} ⏳${save.pu.slow} · серія ★★★ ${save.streak % 4}/4`; show('menu'); }
 function syncSettings() { $('tVib').classList.toggle('on', save.set.vib); $('tSnd').classList.toggle('on', save.set.snd); $('rSfx').value = save.set.sfx; $('rMus').value = save.set.mus;
   document.querySelectorAll('#qSeg button').forEach(b => b.classList.toggle('on', b.dataset.q === save.set.q));
@@ -577,12 +711,12 @@ function achNext() { const a = achQ.shift(); if (!a) { achBusy = false; return; 
 function buildAch() { const n = Object.keys(save.achv).length; $('achCount').textContent = `${n} / ${PR.ACH.length}`;
   $('achList').innerHTML = PR.ACH.map(a => { const t = save.achv[a.id]; return `<div class="ach${t ? ' got' : ''}"><span class="ai">${t ? a.i : '🔒'}</span><div><b>${a.n}</b><small>${a.d}</small>${t ? `<em>${new Date(t).toLocaleDateString('uk-UA')}</em>` : ''}</div></div>`; }).join(''); }
 const fmtT = s => { s = Math.round(s); const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), ss = s % 60; return h ? `${h} год ${m} хв` : m ? `${m} хв ${ss} с` : `${ss} с`; };
-function buildStats() { const st = save.stats, stn = PR.stars(save), rk = PR.rank(stn), done = Object.keys(save.best).length;
+function buildStats() { const st = save.stats, stn = PR.stars(save), rk = PR.rank(stn), done = LEVELS.filter((_, i) => bestOf(i)).length;
   const D = { swallowed: 'горизонт подій', moon: 'місяці', flare: 'спалахи', oob: 'відкритий космос', stranded: 'зупинка без запусків' };
-  const rows = [['Ранг', rk.name], ['Зірки', `${stn} / 150`], ['Загальний рахунок', PR.score(save).toLocaleString('uk-UA')], ['Пройдено рівнів', `${done} / ${LEVELS.length}`], ['Запуски', st.launches], ['Час у польоті', fmtT(st.flight)], ['Час у грі', fmtT(st.play)],
+  const rows = [['Ранг', rk.name], ['Зірки', `${stn} / ${CAT.maxStars}`], ['Загальний рахунок', PR.score(save).toLocaleString('uk-UA')], ['Пройдено рівнів', `${done} / ${LEVELS.length}`], ['Запуски', st.launches], ['Час у польоті', fmtT(st.flight)], ['Час у грі', fmtT(st.play)],
     ['Перемоги / втрати', `${st.wins} / ${st.fails}`], ...Object.keys(D).filter(k => st.deaths[k]).map(k => ['  · ' + D[k], st.deaths[k]]), ['Бонусні зірки', st.bonus], ['Рикошети', st.bounces], ['Кротові нори', st.worms], ['Перемикання магнітів', st.flips], ['Використано бонусів', st.puUsed], ['Сповільнений час', fmtT(st.dilate)]];
   let h = '<div class="rows">' + rows.map(r => `<div><span>${r[0]}</span><b>${r[1]}</b></div>`).join('') + '</div><h3>Рекорди рівнів</h3><div class="rows lvb">';
-  for (let i = 0; i < LEVELS.length; i++) { const b = save.best[i]; if (!b) continue; h += `<div><span>${i + 1}. ${LEVELS[i].n}</span><b>${'★'.repeat(b.s)}${'☆'.repeat(3 - b.s)} ${b.sc} · ${b.t ? b.t.toFixed(1) + 'с' : '—'}</b></div>`; }
+  for (let i = 0; i < LEVELS.length; i++) { const b = bestOf(i); if (!b) continue; h += `<div><span>${i + 1}. ${LEVELS[i].n}</span><b>${'★'.repeat(b.s)}${'☆'.repeat(3 - b.s)} ${b.sc} · ${b.t ? b.t.toFixed(1) + 'с' : '—'}</b></div>`; }
   if (!done) h += '<div><span>Ще немає пройдених рівнів</span></div>';
   $('statBody').innerHTML = h + '</div>'; }
 $('bAch').onclick = () => { buildAch(); show('achs'); }; $('bStats').onclick = () => { buildStats(); show('stats'); };
@@ -590,8 +724,8 @@ $('bAchBack').onclick = toMenu; $('bStatBack').onclick = toMenu;
 document.querySelectorAll('#qSeg button').forEach(b => b.onclick = () => { save.set.q = b.dataset.q; if (b.dataset.q === 'auto') { autoQ = 1; autoUp = 0; } persist(); resize(); syncSettings(); });
 document.addEventListener('pointerdown', () => AU.unlock(), true);
 document.getElementById('ui').addEventListener('click', e => { if (e.target.closest('button')) AU.click(); });
-$('bPlay').onclick = () => startLevel(Math.min(save.unlocked, LEVELS.length) - 1);
-$('bSectors').onclick = () => { buildSectors(); show('sectors'); };
+$('bPlay').onclick = () => { let i = 0; for (let k = 0; k < LEVELS.length; k++) if (isOpen(k)) i = k; startLevel(i); };
+$('bSectors').onclick = () => { secPage = -1; buildSectors(); show('sectors'); };
 $('bSettings').onclick = () => { syncSettings(); show('settings'); };
 $('tVib').onclick = () => { save.set.vib = !save.set.vib; persist(); syncSettings(); HAP.tick(); };
 $('tSnd').onclick = () => { save.set.snd = !save.set.snd; persist(); syncSettings(); };
@@ -600,10 +734,10 @@ $('rMus').oninput = e => { save.set.mus = +e.target.value; persist(); AU.configu
 $('bSetBack').onclick = toMenu; $('bBack1').onclick = toMenu; $('bBack2').onclick = () => { buildSectors(); show('sectors'); };
 $('bRestart').onclick = () => { if (started) { ghost = attempt.slice(); ghostLevel = li; } startLevel(li, true); }; $('bMenu').onclick = toMenu;
 $('bNext').onclick = () => startLevel(li + 1); $('bRetry').onclick = () => startLevel(li); $('bRetry2').onclick = () => startLevel(li, true);
-$('bLv').onclick = $('bLv2').onclick = () => { curSector = Math.floor(li / 10); buildLevels(); show('levels'); };
+$('bLv').onclick = $('bLv2').onclick = () => { curSector = CAT.secOf[li]; buildLevels(); show('levels'); };
 AU.configure(save.set); toMenu();
 window.BH = { LEVELS, startLevel, launch: (a, p) => launch(a, p), get state() { return state; }, get ship() { return ship; }, get clock() { return clock; }, toMenu, save, persist,
   advance(n, brake, tg) { braking = !!brake && ship.fuel > 0; for (let i = 0; i < n && state === 'fly'; i++) { if (tg != null && i === tg) ship.flip = -ship.flip; tick(); } braking = false; },
   runPlanStep(st) { launch(st.a, st.p); for (let i = 0; i < 2600 && state === 'fly'; i++) { if (st.tg != null && i === st.tg) ship.flip = -ship.flip; braking = st.b != null && i >= st.b && ship.fuel > 0; tick(); } braking = false; },
-  show, buildSectors, syncSettings, buildAch, buildStats, achCheck, get gl() { return useGL; }, get quality() { return qLevel; }, get zoom() { return Z; }, freeze(b) { frozen = !!b; }, setShip(x, y, vx, vy) { ship.x = x; ship.y = y; ship.vx = vx; ship.vy = vy; } };
+  show, buildSectors, syncSettings, buildAch, buildStats, achCheck, get gl() { return useGL; }, get quality() { return qLevel; }, get zoom() { return Z; }, CAT, levelId: LID, unlockAll() { LEVELS.forEach((_, i) => save.open[LID(i)] = 1); persist(); }, get braking() { return braking; }, get pressing() { return !!press; }, toScreen(x, y) { return [X(x), Y(y)]; }, stepN(n) { for (let i = 0; i < n && state === 'fly'; i++) tick(); }, freeze(b) { frozen = !!b; }, setShip(x, y, vx, vy) { ship.x = x; ship.y = y; ship.vx = vx; ship.vy = vy; } };
 })();
