@@ -1,4 +1,4 @@
-/* Blackhole Battle v3 — stage 1 gameplay */
+/* Blackhole Battle v3.1 — stage 2: visuals, sound, progress (gameplay/physics unchanged from v3.0) */
 (() => {
 'use strict';
 const S = window.BHSim;
@@ -11,15 +11,23 @@ const SECTORS = [
   { n: 'Горизонт подій', d: 'Усе разом: пульсари й подвійні діри', c: '#ea580c' }];
 const PU = { extra: { i: '🚀', n: '+1 запуск' }, scan: { i: '📡', n: 'Сканер' }, shield: { i: '🛡', n: 'Щит' }, slow: { i: '⏳', n: 'Сповільнення 3с' } };
 const $ = id => document.getElementById(id);
-const cv = $('c'), ctx = cv.getContext('2d');
-let W, H, DPR, SC, OX, OY, camWY = 0;
-const X = x => OX + x * SC, Y = y => OY + (y - camWY) * SC, R = v => v * SC;
+const cv = $('c'), octx = cv.getContext('2d'); let ctx = octx;
+const sc = document.createElement('canvas'), sctx = sc.getContext('2d');
+const glc = $('gl'), GFX = window.BHGfx;
+let useGL = !!(GFX && glc && !/[?&]nogl/.test(location.search) && GFX.init(glc));
+const NOOP = () => {}; const AU = window.BHAudio || { unlock: NOOP, configure: NOOP, update: NOOP, aimStart: NOOP, aimPower: NOOP, aimEnd: NOOP, launch: NOOP, bounce: NOOP, star: NOOP, win: NOOP, lose: NOOP, magnet: NOOP, key: NOOP, worm: NOOP, stop: NOOP, crash: NOOP, shield: NOOP, click: NOOP, ach: NOOP };
+const PR = window.BHProg;
+let W, H, DPR, SC, OX, OY, camWY = 0, Z = 1, camCX = 180, camCY = 320, QS = 1, BGS = 1, qLevel = 1, autoQ = 1, autoUp = 0, fpsT = 0, fpsN = 0;
+const X = x => OX + (180 + (x - camCX) * Z) * SC, Y = y => OY + (320 + (y - camCY) * Z) * SC, R = v => v * SC * Z;
+let lenses = [], planetCache = {}, fl = { bounces: 0, margin: 1e9 }, cpK = 0, proxK = 0;
+const QN = ['низька', 'середня', 'висока'];
 function rng(seed) { let s = seed >>> 0 || 1; return () => (s = (s * 1664525 + 1013904223) >>> 0) / 4294967296; }
 
 // ---------- save ----------
 const KEY = 'bh_v3';
 let save; try { save = JSON.parse(localStorage.getItem(KEY)) || null; } catch (e) { save = null; }
-save = Object.assign({ unlocked: 1, best: {}, tut: {}, pu: { extra: 0, scan: 0, shield: 0, slow: 0 }, streak: 0, ach: {}, set: { vib: true, snd: true, sfx: 80, mus: 60 } }, save || {});
+save = Object.assign({ unlocked: 1, best: {}, tut: {}, pu: { extra: 0, scan: 0, shield: 0, slow: 0 }, streak: 0, ach: {}, set: {} }, save || {});
+save.set = Object.assign({ vib: true, snd: true, sfx: 80, mus: 60, q: 'auto' }, save.set || {}); PR.ensure(save);
 const persist = () => { try { localStorage.setItem(KEY, JSON.stringify(save)); } catch (e) {} };
 const puTotal = () => Object.values(save.pu).reduce((a, b) => a + b, 0);
 
@@ -37,22 +45,31 @@ const HAP = {
 let bg = null, layers = [], twinkles = [];
 function buildBG() {
   const r = rng(7);
-  bg = document.createElement('canvas'); bg.width = W * DPR; bg.height = H * DPR;
-  const b = bg.getContext('2d'); b.scale(DPR, DPR);
+  bg = document.createElement('canvas'); bg.width = W * BGS; bg.height = H * BGS;
+  const b = bg.getContext('2d'); b.scale(BGS, BGS);
   const g = b.createLinearGradient(0, 0, 0, H); g.addColorStop(0, '#05030f'); g.addColorStop(.5, '#0a0520'); g.addColorStop(1, '#03020a');
   b.fillStyle = g; b.fillRect(0, 0, W, H);
-  const neb = [['124,58,237', .22], ['219,39,119', .14], ['14,165,233', .12], ['234,88,12', .08]];
-  for (let i = 0; i < 9; i++) { const [c, a] = neb[i % 4]; const x = r() * W, y = r() * H, rad = (0.25 + r() * 0.45) * Math.max(W, H);
-    const ng = b.createRadialGradient(x, y, 0, x, y, rad); ng.addColorStop(0, `rgba(${c},${a})`); ng.addColorStop(1, `rgba(${c},0)`); b.fillStyle = ng; b.fillRect(0, 0, W, H); }
+  const neb = [['124,58,237', .24], ['219,39,119', .15], ['14,165,233', .13], ['234,88,12', .09]];
+  for (let i = 0; i < 11; i++) { const [c, a] = neb[i % 4]; const x = r() * W, y = r() * H, rad = (0.2 + r() * 0.45) * Math.max(W, H);
+    const ng = b.createRadialGradient(x, y, 0, x, y, rad); ng.addColorStop(0, `rgba(${c},${a})`); ng.addColorStop(.5, `rgba(${c},${a * .35})`); ng.addColorStop(1, `rgba(${c},0)`); b.fillStyle = ng; b.fillRect(0, 0, W, H); }
+  // dust lanes
+  b.globalCompositeOperation = 'multiply'; for (let i = 0; i < 5; i++) { const x = r() * W, y = r() * H, rad = (0.1 + r() * 0.25) * W; const dg = b.createRadialGradient(x, y, 0, x, y, rad); dg.addColorStop(0, 'rgba(10,6,20,.55)'); dg.addColorStop(1, 'rgba(10,6,20,0)'); b.fillStyle = dg; b.fillRect(0, 0, W, H); } b.globalCompositeOperation = 'source-over';
   layers = [0.6, 1, 1.6].map((sz, li) => {
-    const L = document.createElement('canvas'); L.width = (W + 80) * DPR; L.height = (H + 80) * DPR; const c = L.getContext('2d'); c.scale(DPR, DPR);
-    for (let i = 0; i < [260, 110, 40][li]; i++) { const x = r() * (W + 80), y = r() * (H + 80), a = 0.3 + r() * 0.7; c.fillStyle = `rgba(255,255,255,${a})`; c.beginPath(); c.arc(x, y, sz * (0.5 + r()), 0, 7); c.fill(); }
+    const L = document.createElement('canvas'); L.width = (W + 80) * BGS; L.height = (H + 80) * BGS; const c = L.getContext('2d'); c.scale(BGS, BGS);
+    for (let i = 0; i < [280, 120, 42][li]; i++) { const x = r() * (W + 80), y = r() * (H + 80), a = 0.3 + r() * 0.7, tint = ['255,255,255', '199,210,254', '254,243,199', '191,219,254'][Math.floor(r() * 4)]; c.fillStyle = `rgba(${tint},${a})`; c.beginPath(); c.arc(x, y, sz * (0.5 + r()), 0, 7); c.fill();
+      if (li === 2 && r() < .35) { c.strokeStyle = `rgba(${tint},${a * .35})`; c.lineWidth = .6; c.beginPath(); c.moveTo(x - 5, y); c.lineTo(x + 5, y); c.moveTo(x, y - 5); c.lineTo(x, y + 5); c.stroke(); } }
     return L;
   });
   twinkles = Array.from({ length: 45 }, () => ({ x: r() * W, y: r() * H, p: r() * 6.28, s: 0.6 + r() * 1.4, f: 1 + r() * 3 }));
 }
-function resize() { DPR = Math.min(window.devicePixelRatio || 1, 2); W = innerWidth; H = innerHeight; cv.width = W * DPR; cv.height = H * DPR; ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
-  SC = Math.min(W / 360, H / 640); OX = (W - 360 * SC) / 2; OY = (H - 640 * SC) / 2; buildBG(); }
+function resize() {
+  const dpr = window.devicePixelRatio || 1; W = innerWidth; H = innerHeight;
+  qLevel = save.set.q === 'low' ? 0 : save.set.q === 'high' ? 2 : autoQ;
+  DPR = Math.min(dpr, qLevel === 0 ? 1.5 : 2); QS = Math.min(dpr, [1, 1.5, 2][qLevel]);
+  cv.width = W * DPR; cv.height = H * DPR; octx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  if (useGL) { sc.width = Math.round(W * QS); sc.height = Math.round(H * QS); sctx.setTransform(QS, 0, 0, QS, 0, 0); GFX.resize(W, H, QS); glc.style.display = 'block'; BGS = QS; }
+  else { glc && (glc.style.display = 'none'); BGS = DPR; }
+  SC = Math.min(W / 360, H / 640); OX = (W - 360 * SC) / 2; OY = (H - 640 * SC) / 2; planetCache = {}; buildBG(); }
 addEventListener('resize', resize); resize();
 let parX = 0, parY = 0;
 function drawBG(t) {
@@ -71,7 +88,7 @@ function startLevel(i, keepGhost) {
   li = i; L = S.prep(LEVELS[i]); ship = S.newShip(L); ship.ang = -Math.PI / 2;
   launchesLeft = L.L; collected = new Set(); clock = 0; started = false; braking = false; pressT = -1;
   trail = []; attempt = []; parts = []; pops = []; aim = null; preview = []; tf = 1; active = {}; scanArmed = false; shieldOn = false; slowT = 0;
-  camWY = clampCam(ship.y); state = 'aim'; show(null); $('hud').style.display = 'flex'; $('hTime').textContent = '0.0';
+  planetCache = {}; camWY = clampCam(ship.y); Z = 1; camCX = 180; camCY = camWY + 320; fl = { bounces: 0, margin: 1e9 }; AU.aimEnd(); state = 'aim'; show(null); $('hud').style.display = 'flex'; $('hTime').textContent = '0.0';
   $('hLevel').textContent = `${i + 1}. ${L.n}`; $('hTarget').textContent = L.t3 ? `3★ ≤ ${L.t3}с` : '';
   $('chipFuel').style.display = L.stops ? '' : 'none';
   hud(); buildPU();
@@ -96,7 +113,7 @@ function buildPU() {
 }
 function usePU(k) {
   if (active[k] || save.pu[k] <= 0) return;
-  save.pu[k]--; persist(); active[k] = 1;
+  save.pu[k]--; save.stats.puUsed++; persist(); active[k] = 1; AU.click(); achCheck();
   if (k === 'extra') launchesLeft++;
   if (k === 'scan') scanArmed = true;
   if (k === 'shield') shieldOn = true;
@@ -106,7 +123,7 @@ function toast(t, ms) { const e = $('toast'); e.innerHTML = t; e.style.display =
 function show(id) { document.querySelectorAll('.scr').forEach(e => e.classList.remove('on')); if (id) $(id).classList.add('on'); }
 
 // ---------- input ----------
-function wpos(e) { return { x: (e.clientX - OX) / SC, y: (e.clientY - OY) / SC + camWY }; }
+function wpos(e) { return { x: camCX + ((e.clientX - OX) / SC - 180) / Z, y: camCY + ((e.clientY - OY) / SC - 320) / Z }; }
 function aimVec() { const dx = aim.sx - aim.x, dy = aim.sy - aim.y, d = Math.hypot(dx, dy); const pull = Math.min(d, S.MAX_PULL); return { a: Math.atan2(dy, dx), p: pull, pct: Math.round(pull / S.MAX_PULL * 100) }; }
 function launch(a, p) {
   const sp = S.launchSpeed(p); ship.vx = Math.cos(a) * sp; ship.vy = Math.sin(a) * sp;
@@ -115,27 +132,27 @@ function launch(a, p) {
   for (let i = 0; i < 18; i++) spark(ship.x, ship.y, '#22d3ee', 60 + Math.random() * 90, a + Math.PI + (Math.random() - .5) * 1.2);
   $('hint').style.display = 'none'; $('hand').style.display = 'none'; $('pu').style.display = 'none';
   if (li === 0) { save.tut.aim = 1; persist(); }
-  HAP.launch(); hud();
+  HAP.launch(); AU.launch(p / S.MAX_PULL * 100); save.stats.launches++; hud();
 }
 cv.addEventListener('pointerdown', e => {
   e.preventDefault();
   if (state === 'fly') { pressT = performance.now(); return; }
   if (state !== 'aim') return;
-  const p = wpos(e); aim = { sx: p.x, sy: p.y, x: p.x, y: p.y, lastPct: 0 }; $('hand').style.display = 'none';
+  const p = wpos(e); aim = { sx: p.x, sy: p.y, x: p.x, y: p.y, lastPct: 0 }; $('hand').style.display = 'none'; AU.aimStart();
 });
 cv.addEventListener('pointermove', e => {
   if (state !== 'aim' || !aim) return; const p = wpos(e); aim.x = p.x; aim.y = p.y;
-  const v = aimVec(); const step = Math.floor(v.pct / 10); if (step !== aim.lastPct) { aim.lastPct = step; HAP.tick(); }
+  const v = aimVec(); AU.aimPower(v.pct); const step = Math.floor(v.pct / 10); if (step !== aim.lastPct) { aim.lastPct = step; HAP.tick(); }
   preview = (scanArmed && v.p > 3) ? computePreview(v.a, v.p) : [];
 });
 const up = () => {
   if (state === 'fly') {
     const held = pressT >= 0 ? performance.now() - pressT : 0; pressT = -1;
-    if (!braking && held < 160 && L.magnets.length) { ship.flip = -ship.flip; HAP.magnet(); burst(ship.x, ship.y, ship.flip > 0 ? '#f87171' : '#60a5fa', 12); }
+    if (!braking && held < 160 && L.magnets.length) { ship.flip = -ship.flip; HAP.magnet(); AU.magnet(ship.flip); save.stats.flips++; achCheck(); burst(ship.x, ship.y, ship.flip > 0 ? '#f87171' : '#60a5fa', 12); }
     braking = false; hud(); return;
   }
   if (state !== 'aim' || !aim) return;
-  const v = aimVec(); if (v.p < 6) { aim = null; preview = []; return; }
+  const v = aimVec(); if (v.p < 6) { aim = null; preview = []; AU.aimEnd(); return; }
   launch(v.a, v.p);
 };
 cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', up);
@@ -154,33 +171,35 @@ function tick() {
   clock += S.STEP;
   const ev = S.step(ship, L, { brake: braking && ship.fuel > 0 });
   tf = ev.tf;
-  if (ev.bounce) { shake = Math.min(12, shake + 6); burst(ship.x, ship.y, '#fbbf24', 8); HAP.bounce(); }
-  if (ev.broke >= 0) { const a = L.asteroids[ev.broke]; for (let k = 0; k < 30; k++) spark(a[0] + (Math.random() - .5) * a[2], a[1], '#a8a29e'); shake = 14; toast('💥 Астероїд розбито!', 900); }
-  if (ev.key >= 0) { burst(L.keys[ev.key][0], L.keys[ev.key][1], '#fde047', 30); HAP.key(); toast('🔑 Ворота відчинено!', 1000); }
-  if (ev.worm) { burst(ship.x, ship.y, '#34d399', 24); shake = 6; trail = []; }
+  const stt = save.stats; stt.flight += S.STEP; if (tf < 0.6) stt.dilate += S.STEP;
+  for (const h of L.holes) { const [hx, hy] = S.holePos(h, ship.t); const m = (Math.hypot(ship.x - hx, ship.y - hy) - h.r * S.KILL) / h.r; if (m < fl.margin) fl.margin = m; }
+  if (ev.bounce) { shake = Math.min(12, shake + 6); burst(ship.x, ship.y, '#fbbf24', 8); HAP.bounce(); AU.bounce(); fl.bounces++; stt.bounces++; }
+  if (ev.broke >= 0) { const a = L.asteroids[ev.broke]; for (let k = 0; k < 30; k++) spark(a[0] + (Math.random() - .5) * a[2], a[1], '#a8a29e'); shake = 14; toast('💥 Астероїд розбито!', 900); AU.crash(); stt.breaks++; achCheck(); }
+  if (ev.key >= 0) { burst(L.keys[ev.key][0], L.keys[ev.key][1], '#fde047', 30); HAP.key(); AU.key(); toast('🔑 Ворота відчинено!', 1000); }
+  if (ev.worm) { burst(ship.x, ship.y, '#34d399', 24); shake = 6; trail = []; AU.worm(); stt.worms++; achCheck(); }
   const lt = trail[trail.length - 1];
   if (!lt || Math.hypot(ship.x - lt.x, ship.y - lt.y) > 2.5) { trail.push({ x: ship.x, y: ship.y, tf }); if (trail.length > 160) trail.shift(); }
   const la = attempt[attempt.length - 1]; if (!la || Math.hypot(ship.x - la[0], ship.y - la[1]) > 4) { attempt.push([ship.x, ship.y, ev.worm ? 1 : 0]); if (attempt.length > 3000) attempt.shift(); }
   L.stars.forEach((s, k) => {
-    if (!collected.has(k) && Math.hypot(ship.x - s[0], ship.y - s[1]) < 22) { collected.add(k); burst(s[0], s[1], '#fde047', 26); pops.push({ x: s[0], y: s[1], t: 0 }); HAP.star();
+    if (!collected.has(k) && Math.hypot(ship.x - s[0], ship.y - s[1]) < 22) { collected.add(k); burst(s[0], s[1], '#fde047', 26); pops.push({ x: s[0], y: s[1], t: 0 }); HAP.star(); AU.star(collected.size); save.stats.bonus++;
       const b = $('bonus'); b.classList.remove('pop'); void b.offsetWidth; b.classList.add('pop'); hud(); }
   });
   const st = S.status(ship, L);
   if (st === 'win') return win();
   if (st) {
     if (shieldOn) { shieldOn = false; deflect(st); hud(); return; }
-    return fail({ swallowed: 'Шатл перетнув горизонт подій.', moon: 'Зіткнення з місяцем!', flare: 'Шатл згорів у сонячному спалаху.', oob: 'Шатл відлетів у відкритий космос.' }[st] || 'Загибель');
+    return fail({ swallowed: 'Шатл перетнув горизонт подій.', moon: 'Зіткнення з місяцем!', flare: 'Шатл згорів у сонячному спалаху.', oob: 'Шатл відлетів у відкритий космос.' }[st] || 'Загибель', st);
   }
   if (braking && Math.hypot(ship.vx, ship.vy) < S.STOP_SPEED) {
-    ship.vx = 0; ship.vy = 0; braking = false; burst(ship.x, ship.y, '#fb923c', 14); HAP.stop();
+    ship.vx = 0; ship.vy = 0; braking = false; burst(ship.x, ship.y, '#fb923c', 14); HAP.stop(); AU.stop();
     if (launchesLeft > 0) { state = 'aim'; const h = $('hint'); h.innerHTML = '🛑 Зупинка! Цілься знову — <b>ще ' + launchesLeft + '</b>'; h.style.display = 'block'; }
-    else fail('Шатл зупинився, а запусків більше немає.');
+    else fail('Шатл зупинився, а запусків більше немає.', 'stranded');
     hud();
   }
   if (braking && ship.fuel <= 0) braking = false;
 }
 function deflect(st) {
-  toast('🛡 Щит врятував шатл!', 1100); shake = 12; burst(ship.x, ship.y, '#67e8f9', 40); HAP.bounce();
+  toast('🛡 Щит врятував шатл!', 1100); shake = 12; burst(ship.x, ship.y, '#67e8f9', 40); HAP.bounce(); AU.shield(); save.stats.shields++; achCheck();
   let nx = -ship.vx, ny = -ship.vy;
   if (st === 'swallowed') { let best = null; for (const h of L.holes) { const [hx, hy] = S.holePos(h, ship.t); const d = Math.hypot(ship.x - hx, ship.y - hy); if (!best || d < best.d) best = { d, hx, hy, r: h.r }; }
     const dx = ship.x - best.hx, dy = ship.y - best.hy, d = Math.hypot(dx, dy) || 1; ship.x = best.hx + dx / d * best.r * (S.KILL + 1.2); ship.y = best.hy + dy / d * best.r * (S.KILL + 1.2); nx = dx / d * 220; ny = dy / d * 220; }
@@ -193,18 +212,21 @@ function win() {
   state = 'result'; burst(L.portal[0], L.portal[1], '#22d3ee', 50); $('hud').style.display = 'none'; $('hint').style.display = 'none'; ghost = null;
   const t = clock, st = starsFor(t), timePts = Math.max(0, Math.round(((L.t2 || 20) - t) * 100)), bon = collected.size * 250, unused = launchesLeft * 300;
   const score = st * 1000 + timePts + bon + unused;
-  const prev = save.best[li] || { s: 0, sc: 0 }; const isBest = score > prev.sc;
-  save.best[li] = { s: Math.max(prev.s, st), sc: Math.max(prev.sc, score) };
+  const prev = save.best[li] || { s: 0, sc: 0 }; const isBest = score > prev.sc; const rk0 = PR.rank(PR.stars(save));
+  save.best[li] = { s: Math.max(prev.s, st), sc: Math.max(prev.sc, score), t: Math.min(prev.t || 1e9, +t.toFixed(2)) };
+  save.stats.wins++; AU.win(st);
   save.unlocked = Math.max(save.unlocked, Math.min(LEVELS.length, li + 2));
   let streakMsg = '';
   if (st === 3) { save.streak++; if (save.streak % 4 === 0) streakMsg = grant(`Серія ${save.streak}× ★★★`); else streakMsg = `Серія ★★★: ${save.streak % 4}/4 до бонусу`; }
   else { save.streak = 0; streakMsg = 'Серію ★★★ скинуто'; }
   if (L.boss && !save.ach['boss' + li]) { save.ach['boss' + li] = 1; streakMsg += '<br>' + grant('Бос переможений'); }
+  const rk1 = PR.rank(PR.stars(save)); if (rk1.i > rk0.i) streakMsg += `<br>🎖 Новий ранг: <b>${rk1.name}</b>!`;
+  achCheck({ type: 'win', bonus: collected.size, margin: fl.margin, bounces: fl.bounces, time: t });
   persist();
   $('rTitle').textContent = st === 3 ? 'Ідеально!' : st === 2 ? 'Чудово!' : 'Портал досягнуто';
   $('rStars').innerHTML = [0, 1, 2].map(k => `<span class="${k < st ? '' : 'e'}">★</span>`).join('');
   $('rRows').innerHTML = `<div><span>⏱ ${t.toFixed(1)}с (3★ ≤ ${L.t3}с, 2★ ≤ ${L.t2}с)</span></div><div><span>Рейтинг ${st}×1000</span><b>${st * 1000}</b></div><div><span>Бонус за час</span><b>${timePts}</b></div><div><span>Бонусні зірки ${collected.size}×250</span><b>${bon}</b></div><div><span>Запуски в запасі ${launchesLeft}×300</span><b>${unused}</b></div>`;
-  $('rScore').textContent = score; $('rBest').textContent = isBest ? '🏆 Новий рекорд!' : `Рекорд: ${save.best[li].sc}`; $('rStreak').innerHTML = streakMsg;
+  $('rScore').textContent = score; $('rTotal').textContent = `Загальний рахунок: ${PR.score(save)} · ${rk1.name}`; $('rBest').textContent = isBest ? '🏆 Новий рекорд!' : `Рекорд: ${save.best[li].sc}`; $('rStreak').innerHTML = streakMsg;
   $('bNext').style.display = li + 1 < LEVELS.length ? '' : 'none';
   setTimeout(() => { if (state === 'result') show('result'); }, 450);
 }
@@ -213,46 +235,101 @@ function grant(why) {
   const keys = Object.keys(PU); const k = keys[(save.streak + Object.keys(save.ach).length + li) % keys.length]; save.pu[k]++;
   return `🎁 ${why}: отримано ${PU[k].i} ${PU[k].n}!`;
 }
-function fail(msg) {
-  state = 'fail'; burst(ship.x, ship.y, '#ef4444', 40); shake = 14; HAP.death(); $('hud').style.display = 'none'; $('hint').style.display = 'none';
+function fail(msg, why) {
+  state = 'fail'; burst(ship.x, ship.y, '#ef4444', 40); shake = 14; HAP.death(); AU.lose();
+  save.stats.fails++; save.stats.deaths[why || 'other'] = (save.stats.deaths[why || 'other'] || 0) + 1; achCheck({ type: 'fail' }); persist(); $('hud').style.display = 'none'; $('hint').style.display = 'none';
   ghost = attempt.slice(); ghostLevel = li;
   $('fText').textContent = msg; setTimeout(() => { if (state === 'fail') show('fail'); }, 500);
 }
 
 // ---------- drawing ----------
 function glow(x, y, r, col, a) { const g = ctx.createRadialGradient(x, y, 0, x, y, r); g.addColorStop(0, col.replace('A', a)); g.addColorStop(1, col.replace('A', 0)); ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.fill(); }
-function drawHole(h, t) {
+// black hole: scene part (lensed in WebGL) + top part (front of disk, kill ring)
+function diskStroke(x, y, r, t, from, to, a) {
+  ctx.save(); ctx.translate(x, y); ctx.rotate(-0.35); const pc = ctx.globalCompositeOperation; ctx.globalCompositeOperation = 'lighter';
+  for (let k = 0; k < 4; k++) { const g = ctx.createLinearGradient(-r * 2.6, 0, r * 2.6, 0); // doppler beaming: approaching side brighter
+    const c = [[251, 146, 60], [253, 186, 116], [253, 224, 71], [255, 247, 237]][k]; g.addColorStop(0, `rgba(${c},${(.75 - k * .08) * a})`); g.addColorStop(.5, `rgba(${c},${(.35 - k * .05) * a})`); g.addColorStop(1, `rgba(${c},${(.18) * a})`);
+    ctx.strokeStyle = g; ctx.lineWidth = R(3.4 - k * 0.7); ctx.beginPath(); ctx.ellipse(0, 0, r * (2.6 - k * .32), r * (0.62 - k * .075), 0, from, to); ctx.stroke(); }
+  // hot clumps orbiting
+  for (let k = 0; k < 7; k++) { const an = t * (1.6 + k * .13) + k * 0.9; if (((an % 6.283) + 6.283) % 6.283 < from || ((an % 6.283) + 6.283) % 6.283 > to) continue; const rr = 1.75 + (k % 3) * .3; ctx.fillStyle = `rgba(255,237,213,${.55 * a})`; ctx.beginPath(); ctx.ellipse(Math.cos(an) * r * rr, Math.sin(an) * r * rr * .24, R(1.6), R(1), 0, 0, 7); ctx.fill(); }
+  ctx.globalCompositeOperation = pc; ctx.restore();
+}
+function drawHoleScene(h, t) {
   const [hx, hy] = S.holePos(h, t); const mk = S.holeMass(h, t) / h.m; const x = X(hx), y = Y(hy), r = R(h.r) * (0.85 + 0.15 * mk);
-  ctx.save(); ctx.beginPath(); ctx.arc(x, y, r * 3.2, 0, 7); ctx.clip(); ctx.translate(x, y); ctx.rotate(Math.PI); ctx.scale(1.35, 1.35); ctx.translate(-x, -y); ctx.globalAlpha = 0.85; ctx.drawImage(bg, 0, 0, W, H); ctx.restore();
-  const dk = ctx.createRadialGradient(x, y, r, x, y, r * 3.2); dk.addColorStop(0, 'rgba(0,0,0,.85)'); dk.addColorStop(.35, 'rgba(20,0,40,.35)'); dk.addColorStop(1, 'rgba(0,0,0,0)'); ctx.fillStyle = dk; ctx.beginPath(); ctx.arc(x, y, r * 3.2, 0, 7); ctx.fill();
+  if (useGL) lenses.push({ x, y, r, s: 0.8 + 0.2 * mk });
+  else {
+    ctx.save(); ctx.beginPath(); ctx.arc(x, y, r * 3.2, 0, 7); ctx.clip(); ctx.translate(x, y); ctx.rotate(Math.PI); ctx.scale(1.35, 1.35); ctx.translate(-x, -y); ctx.globalAlpha = 0.85; ctx.drawImage(bg, 0, 0, W, H); ctx.restore();
+    const dk = ctx.createRadialGradient(x, y, r, x, y, r * 3.2); dk.addColorStop(0, 'rgba(0,0,0,.85)'); dk.addColorStop(.35, 'rgba(20,0,40,.35)'); dk.addColorStop(1, 'rgba(0,0,0,0)'); ctx.fillStyle = dk; ctx.beginPath(); ctx.arc(x, y, r * 3.2, 0, 7); ctx.fill();
+  }
   for (let i = 0; i < 3; i++) { const ph = (t * (h.pulse ? h.pulse.w * 0.3 : 0.45) + i / 3) % 1; ctx.strokeStyle = `rgba(196,181,253,${0.28 * ph * mk})`; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(x, y, r * (7 - ph * 6), 0, 7); ctx.stroke(); }
-  ctx.save(); ctx.translate(x, y); ctx.rotate(-0.35);
-  for (let k = 0; k < 3; k++) { ctx.beginPath(); ctx.ellipse(0, 0, r * (2.5 - k * .3), r * (0.6 - k * .07), 0, 0, 7); ctx.strokeStyle = ['rgba(251,146,60,.55)', 'rgba(253,224,71,.7)', 'rgba(255,247,237,.85)'][k]; ctx.lineWidth = R(3 - k * 0.6); ctx.stroke(); }
-  ctx.restore();
-  ctx.save(); ctx.shadowColor = '#a855f7'; ctx.shadowBlur = 26; ctx.fillStyle = '#000'; ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.fill(); ctx.restore();
-  ctx.strokeStyle = 'rgba(255,237,213,.9)'; ctx.lineWidth = R(1.3); ctx.beginPath(); ctx.arc(x, y, r * 1.06, 0, 7); ctx.stroke();
-  // event horizon kill radius
+  glow(x, y, r * 3.4, 'rgba(251,146,60,A)', .16 * mk);
+  diskStroke(x, y, r, t, 0, 6.283, 1);
+  if (!useGL) { ctx.save(); ctx.shadowColor = '#a855f7'; ctx.shadowBlur = 26; ctx.fillStyle = '#000'; ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.fill(); ctx.restore();
+    ctx.strokeStyle = 'rgba(255,237,213,.9)'; ctx.lineWidth = R(1.3); ctx.beginPath(); ctx.arc(x, y, r * 1.06, 0, 7); ctx.stroke(); }
+}
+function drawHoleTop(h, t) {
+  const [hx, hy] = S.holePos(h, t); const mk = S.holeMass(h, t) / h.m; const x = X(hx), y = Y(hy), r = R(h.r) * (0.85 + 0.15 * mk);
+  diskStroke(x, y, r, t, 0, Math.PI, 0.9); // front half of the disk passes in front of the shadow
   ctx.strokeStyle = `rgba(248,113,113,${0.55 + 0.25 * Math.sin(t * 5)})`; ctx.lineWidth = 1.6; ctx.setLineDash([4, 4]); ctx.beginPath(); ctx.arc(x, y, R(h.r * S.KILL), 0, 7); ctx.stroke(); ctx.setLineDash([]);
 }
 function drawWhite(w, t) {
-  const x = X(w[0]), y = Y(w[1]), r = R(w[3]);
+  const x = X(w[0]), y = Y(w[1]), r = R(w[3]); if (useGL) lenses.push({ x, y, r, s: -1 });
   for (let i = 0; i < 4; i++) { const ph = (t * 0.6 + i / 4) % 1; ctx.strokeStyle = `rgba(165,243,252,${0.4 * (1 - ph)})`; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(x, y, r * (1.2 + ph * 6), 0, 7); ctx.stroke(); }
   glow(x, y, r * 3, 'rgba(224,242,254,A)', .7); ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.fill();
 }
-const PCOL = [['#60a5fa', '#1e3a8a'], ['#f472b6', '#831843'], ['#34d399', '#064e3b'], ['#fbbf24', '#78350f'], ['#a78bfa', '#3b0764']];
+const PCOL = [['#60a5fa', '#1e3a8a', '147,197,253'], ['#f472b6', '#831843', '249,168,212'], ['#34d399', '#064e3b', '110,231,183'], ['#fbbf24', '#78350f', '253,224,71'], ['#a78bfa', '#3b0764', '196,181,253']];
+// nearest light source for shading (white holes, flares, accretion disks, portal; else a distant sun top-left)
+function lightAt(px, py) {
+  let best = { d: 1e9, a: -2.3, c: '255,244,220', k: 0.6 };
+  const tt = ship ? ship.t : animT;
+  const con = (lx, ly, c, k, range) => { const d = Math.hypot(lx - px, ly - py); if (d > 1 && d < range && d / k < best.d) best = { d: d / k, a: Math.atan2(ly - py, lx - px), c, k: Math.min(1, 0.45 + k * (1 - d / range)) }; };
+  if (L) { L.whites.forEach(w => con(w[0], w[1], '224,242,254', 1.3, 620)); L.flares.forEach(f => con(f.x + f.w / 2, f.y + f.h / 2, '254,215,170', S.flareOn(f, tt) ? 1.6 : 0.6, 520));
+    L.holes.forEach(h => { const [hx, hy] = S.holePos(h, tt); con(hx, hy, '253,186,116', 1, 300); }); con(L.portal[0], L.portal[1], '103,232,249', 0.7, 230); }
+  return best;
+}
+function planetSprite(p, i, r) {
+  const key = i + '_' + Math.round(r * 10); if (planetCache[key]) return planetCache[key];
+  const [c1, c2, rgb] = PCOL[(Math.round(p[0] + p[1]) + i) % PCOL.length]; const d = Math.ceil(r * 2 * DPR) + 2; const rr = rng(Math.round(p[0] * 7 + p[1] * 13 + i));
+  const body = document.createElement('canvas'); body.width = body.height = d; const b = body.getContext('2d'); b.scale(DPR, DPR); const cr = r;
+  b.save(); b.beginPath(); b.arc(cr + .5, cr + .5, cr, 0, 7); b.clip();
+  const g = b.createRadialGradient(cr * .7, cr * .7, cr * .1, cr, cr, cr * 1.05); g.addColorStop(0, c1); g.addColorStop(1, c2); b.fillStyle = g; b.fillRect(0, 0, cr * 2 + 1, cr * 2 + 1);
+  for (let k = 0; k < 9; k++) { const yy = rr() * cr * 2, hh = cr * (.06 + rr() * .18); b.fillStyle = `rgba(${rr() < .5 ? '255,255,255' : '0,0,20'},${.06 + rr() * .1})`; b.beginPath(); b.ellipse(cr, yy, cr * 1.3, hh, (rr() - .5) * .25, 0, 7); b.fill(); }
+  for (let k = 0; k < 5; k++) { b.fillStyle = 'rgba(0,0,0,.12)'; b.beginPath(); b.arc(rr() * cr * 2, rr() * cr * 2, cr * (.05 + rr() * .1), 0, 7); b.fill(); }
+  b.restore();
+  const cl = document.createElement('canvas'); cl.width = d * 2; cl.height = d; const c = cl.getContext('2d'); c.scale(DPR, DPR);
+  for (let k = 0; k < 22; k++) { const x = rr() * cr * 4, y = cr * (.2 + rr() * 1.6), w = cr * (.3 + rr() * .6); const cg = c.createRadialGradient(x, y, 0, x, y, w); cg.addColorStop(0, 'rgba(255,255,255,.32)'); cg.addColorStop(1, 'rgba(255,255,255,0)'); c.fillStyle = cg; c.beginPath(); c.ellipse(x, y, w, w * .35, 0, 0, 7); c.fill(); }
+  // rings are decorative only: skip them if they would overlap a gameplay object or route
+  const clear = r0 => { const R0 = p[2] * 1.9; const near = (x, y, rr) => Math.hypot(x - p[0], (y - p[1]) * 2.2) < R0 + rr;
+    return !(L.planets.some(q => q !== p && near(q[0], q[1], q[2])) || L.stars.some(t => near(t[0], t[1], 12)) || L.holes.some(h => near(h.x, h.y, h.r * 3)) || near(L.portal[0], L.portal[1], L.pr) || near(L.ship[0], L.ship[1], 14) || L.moons.some(m => near(m.cx, m.cy, m.a + m.r)) || L.worms.some(w => near(w.a[0], w.a[1], 20) || near(w.b[0], w.b[1], 20))); };
+  return planetCache[key] = { body, cl, rgb, ring: (p[2] > 45 || (i + Math.round(p[0])) % 4 === 1) && clear() };
+}
+function ringArc(x, y, r, from, to) {
+  ctx.save(); ctx.translate(x, y); ctx.rotate(-0.3);
+  [[1.75, 2.6, 'rgba(253,230,138,.28)'], [1.55, 1.6, 'rgba(254,243,199,.4)'], [1.38, 3.2, 'rgba(214,211,209,.22)']].forEach(([k, w, c]) => { ctx.strokeStyle = c; ctx.lineWidth = R(w); ctx.beginPath(); ctx.ellipse(0, 0, r * k, r * k * .24, 0, from, to); ctx.stroke(); });
+  ctx.restore();
+}
 function drawPlanet(p, i) {
-  const x = X(p[0]), y = Y(p[1]), r = R(p[2]); const [c1, c2] = PCOL[(Math.round(p[0] + p[1]) + i) % PCOL.length];
-  glow(x, y, r * 1.5, 'rgba(147,197,253,A)', .2);
-  const g = ctx.createRadialGradient(x - r * .4, y - r * .4, r * .1, x, y, r); g.addColorStop(0, c1); g.addColorStop(1, c2); ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.fill();
-  if (p[2] > 45) { ctx.strokeStyle = 'rgba(253,230,138,.4)'; ctx.lineWidth = R(3); ctx.beginPath(); ctx.ellipse(x, y, r * 1.6, r * .35, -0.3, 0, 7); ctx.stroke(); }
+  const x = X(p[0]), y = Y(p[1]), r = R(p[2]); const sp = planetSprite(p, i, r); const lt = lightAt(p[0], p[1]);
+  glow(x, y, r * 1.45, `rgba(${sp.rgb},A)`, .3);
+  if (sp.ring) ringArc(x, y, r, Math.PI, Math.PI * 2);
+  ctx.drawImage(sp.body, x - r - .5, y - r - .5, sp.body.width / DPR, sp.body.height / DPR);
+  ctx.save(); ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.clip();
+  const off = ((animT * r * .06) % (r * 2)); ctx.drawImage(sp.cl, x - r - off, y - r, r * 4, r * 2); ctx.drawImage(sp.cl, x + r * 3 - off, y - r, r * 4, r * 2);
+  // terminator shadow (night side away from the light)
+  const lx = x + Math.cos(lt.a) * r * .55, ly = y + Math.sin(lt.a) * r * .55; const tg = ctx.createRadialGradient(lx, ly, r * .15, lx, ly, r * 1.75);
+  tg.addColorStop(0, 'rgba(0,0,8,0)'); tg.addColorStop(.55, 'rgba(0,0,8,.15)'); tg.addColorStop(.8, 'rgba(0,0,8,.72)'); tg.addColorStop(1, 'rgba(0,0,8,.9)'); ctx.fillStyle = tg; ctx.fillRect(x - r, y - r, r * 2, r * 2);
+  ctx.restore();
+  // atmosphere rim, brighter on the lit side
+  const ag = ctx.createLinearGradient(x - Math.cos(lt.a) * r, y - Math.sin(lt.a) * r, x + Math.cos(lt.a) * r, y + Math.sin(lt.a) * r); ag.addColorStop(0, `rgba(${sp.rgb},.08)`); ag.addColorStop(1, `rgba(${sp.rgb},.85)`);
+  ctx.strokeStyle = ag; ctx.lineWidth = R(2.2); ctx.beginPath(); ctx.arc(x, y, r * 1.02, 0, 7); ctx.stroke();
+  if (sp.ring) ringArc(x, y, r, 0, Math.PI);
 }
 function drawMoon(m, t) {
   ctx.save(); ctx.translate(X(m.cx), Y(m.cy)); ctx.rotate(m.rot || 0); ctx.strokeStyle = 'rgba(248,113,113,.18)'; ctx.setLineDash([4, 6]); ctx.beginPath(); ctx.ellipse(0, 0, Math.max(1, R(m.a)), Math.max(1, R(m.b)), 0, 0, 7); ctx.stroke(); ctx.setLineDash([]); ctx.restore();
-  const [mx, my] = S.moonPos(m, t); const x = X(mx), y = Y(my), r = R(m.r);
+  const [mx, my] = S.moonPos(m, t); const x = X(mx), y = Y(my), r = R(m.r); const lt = lightAt(mx, my);
   glow(x, y, r * 2.2, 'rgba(248,113,113,A)', .25);
-  const g = ctx.createRadialGradient(x - r * .4, y - r * .4, 0, x, y, r); g.addColorStop(0, '#f1f5f9'); g.addColorStop(1, '#475569'); ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.fill();
-  ctx.fillStyle = 'rgba(51,65,85,.6)'; [[.3, -.2, .25], [-.35, .3, .18]].forEach(c => { ctx.beginPath(); ctx.arc(x + c[0] * r, y + c[1] * r, c[2] * r, 0, 7); ctx.fill(); });
-  // direction of travel
+  const g = ctx.createRadialGradient(x + Math.cos(lt.a) * r * .4, y + Math.sin(lt.a) * r * .4, 0, x, y, r * 1.1); g.addColorStop(0, '#f8fafc'); g.addColorStop(.6, '#94a3b8'); g.addColorStop(1, '#1e293b'); ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.fill();
+  ctx.fillStyle = 'rgba(51,65,85,.55)'; [[.3, -.2, .25], [-.35, .3, .18], [.05, .45, .12]].forEach(c => { ctx.beginPath(); ctx.arc(x + c[0] * r, y + c[1] * r, c[2] * r, 0, 7); ctx.fill(); });
   const [nx, ny] = S.moonPos(m, t + 0.15); ctx.strokeStyle = 'rgba(248,113,113,.6)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(X(nx), Y(ny)); ctx.stroke();
 }
 function rectPath(a, i, jag) {
@@ -323,15 +400,33 @@ function drawStar(s, k, t) {
 function drawShuttle() {
   const x = X(ship.x), y = Y(ship.y);
   const ang = state === 'fly' && Math.hypot(ship.vx, ship.vy) > 2 ? Math.atan2(ship.vy, ship.vx) : aim ? aimVec().a : ship.ang; ship.ang = ang;
-  ctx.save(); ctx.translate(x, y); ctx.rotate(ang); const k = R(1);
-  const fl = state === 'fly' && !braking ? 0.6 + thrust * 2 : state === 'aim' ? 0.25 : 0;
-  if (fl > 0) { const len = (14 + Math.random() * 6) * fl * k; const g = ctx.createLinearGradient(-8 * k, 0, -8 * k - len, 0); g.addColorStop(0, 'rgba(255,255,255,.95)'); g.addColorStop(.3, 'rgba(56,189,248,.9)'); g.addColorStop(1, 'rgba(124,58,237,0)'); ctx.fillStyle = g; ctx.beginPath(); ctx.moveTo(-8 * k, -3.5 * k); ctx.quadraticCurveTo(-8 * k - len, 0, -8 * k, 3.5 * k); ctx.fill(); }
-  if (braking) { ctx.fillStyle = 'rgba(251,146,60,.85)'; for (const s of [-1, 1]) { ctx.beginPath(); ctx.moveTo(9 * k, s * 3 * k); ctx.lineTo((16 + Math.random() * 6) * k, s * (6 + Math.random() * 3) * k); ctx.lineTo(9 * k, s * 5 * k); ctx.fill(); } }
-  if (shieldOn) { ctx.strokeStyle = `rgba(103,232,249,${.5 + .3 * Math.sin(animT * 6)})`; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(0, 0, 16 * k, 0, 7); ctx.stroke(); }
-  ctx.fillStyle = '#334155'; ctx.beginPath(); ctx.moveTo(1 * k, 0); ctx.lineTo(-7 * k, 10 * k); ctx.lineTo(-9 * k, 10 * k); ctx.lineTo(-6 * k, 0); ctx.lineTo(-9 * k, -10 * k); ctx.lineTo(-7 * k, -10 * k); ctx.closePath(); ctx.fill();
-  const g = ctx.createLinearGradient(0, -5 * k, 0, 5 * k); g.addColorStop(0, '#fff'); g.addColorStop(.6, '#cbd5e1'); g.addColorStop(1, '#64748b');
-  ctx.fillStyle = g; ctx.beginPath(); ctx.moveTo(13 * k, 0); ctx.quadraticCurveTo(8 * k, -5 * k, -8 * k, -4.5 * k); ctx.lineTo(-9 * k, 4.5 * k); ctx.quadraticCurveTo(8 * k, 5 * k, 13 * k, 0); ctx.fill();
+  // spaghettification: stretch toward the nearest hole
+  let sp = 0, sa = 0; if (L) for (const h of L.holes) { const [hx, hy] = S.holePos(h, ship.t); const d = Math.hypot(hx - ship.x, hy - ship.y); const k = Math.max(0, 1 - (d - h.r * S.KILL) / (h.r * 3.5)); if (k > sp) { sp = k; sa = Math.atan2(hy - ship.y, hx - ship.x); } }
+  const st = 1 + sp * sp * 0.95;
+  // slow-motion echoes
+  if (L && state === 'fly' && (slowT > 0 || tf < 0.75) && trail.length > 16) { for (let e = 4; e >= 1; e--) { const p = trail[Math.max(0, trail.length - 1 - e * 4)]; ctx.globalAlpha = 0.09 * (5 - e); drawHull(X(p.x), Y(p.y), ang, 1, 0, null, true); } ctx.globalAlpha = 1; }
+  drawHull(x, y, ang, st, sa, lightAt(ship.x, ship.y), false);
+}
+function drawHull(x, y, ang, st, sa, lt, ghostly) {
+  ctx.save(); ctx.translate(x, y);
+  if (st > 1.01) { ctx.rotate(sa); ctx.scale(st, 1 / Math.sqrt(st)); ctx.rotate(-sa); }
+  ctx.rotate(ang); const k = R(1);
+  const fl0 = state === 'fly' && !braking ? 0.6 + thrust * 2 : state === 'aim' ? 0.25 : 0;
+  if (fl0 > 0 && !ghostly) { const pc = ctx.globalCompositeOperation; ctx.globalCompositeOperation = 'lighter'; const len = (14 + Math.random() * 6) * fl0 * k; const g = ctx.createLinearGradient(-8 * k, 0, -8 * k - len, 0); g.addColorStop(0, 'rgba(255,255,255,.95)'); g.addColorStop(.3, 'rgba(56,189,248,.9)'); g.addColorStop(1, 'rgba(124,58,237,0)'); ctx.fillStyle = g; ctx.beginPath(); ctx.moveTo(-8 * k, -3.5 * k); ctx.quadraticCurveTo(-8 * k - len, 0, -8 * k, 3.5 * k); ctx.fill();
+    glow(-9 * k, 0, 9 * k * fl0, 'rgba(56,189,248,A)', .5); ctx.globalCompositeOperation = pc; }
+  if (braking && !ghostly) { ctx.fillStyle = 'rgba(251,146,60,.85)'; for (const s of [-1, 1]) { ctx.beginPath(); ctx.moveTo(9 * k, s * 3 * k); ctx.lineTo((16 + Math.random() * 6) * k, s * (6 + Math.random() * 3) * k); ctx.lineTo(9 * k, s * 5 * k); ctx.fill(); } }
+  if (shieldOn && !ghostly) { ctx.strokeStyle = `rgba(103,232,249,${.5 + .3 * Math.sin(animT * 6)})`; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(0, 0, 16 * k, 0, 7); ctx.stroke(); }
+  ctx.fillStyle = ghostly ? '#a5b4fc' : '#334155'; ctx.beginPath(); ctx.moveTo(1 * k, 0); ctx.lineTo(-7 * k, 10 * k); ctx.lineTo(-9 * k, 10 * k); ctx.lineTo(-6 * k, 0); ctx.lineTo(-9 * k, -10 * k); ctx.lineTo(-7 * k, -10 * k); ctx.closePath(); ctx.fill();
+  const body = () => { ctx.beginPath(); ctx.moveTo(13 * k, 0); ctx.quadraticCurveTo(8 * k, -5 * k, -8 * k, -4.5 * k); ctx.lineTo(-9 * k, 4.5 * k); ctx.quadraticCurveTo(8 * k, 5 * k, 13 * k, 0); };
+  const g = ctx.createLinearGradient(0, -5 * k, 0, 5 * k); g.addColorStop(0, '#e2e8f0'); g.addColorStop(.6, '#94a3b8'); g.addColorStop(1, '#475569');
+  ctx.fillStyle = ghostly ? '#c7d2fe' : g; body(); ctx.fill();
+  if (lt && !ghostly) { // directional light from nearest light source
+    const la = lt.a - ang, lx = Math.cos(la) * 7 * k, ly = Math.sin(la) * 7 * k; const lg = ctx.createLinearGradient(lx, ly, -lx, -ly);
+    lg.addColorStop(0, `rgba(${lt.c},${.75 * lt.k})`); lg.addColorStop(.45, `rgba(${lt.c},${.12 * lt.k})`); lg.addColorStop(.6, 'rgba(2,6,23,.15)'); lg.addColorStop(1, 'rgba(2,6,23,.7)');
+    ctx.fillStyle = lg; body(); ctx.fill(); ctx.strokeStyle = lg; ctx.lineWidth = .9 * k; body(); ctx.stroke();
+  }
   ctx.fillStyle = '#7c3aed'; ctx.fillRect(-6 * k, -1 * k, 12 * k, 2 * k); ctx.fillStyle = '#0ea5e9'; ctx.beginPath(); ctx.ellipse(6 * k, 0, 3.2 * k, 2.2 * k, 0, 0, 7); ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,.7)'; ctx.beginPath(); ctx.ellipse(6.8 * k, -.8 * k, 1.1 * k, .6 * k, 0, 0, 7); ctx.fill();
   ctx.restore();
 }
 function drawGhost() {
@@ -360,8 +455,9 @@ function drawAim() {
   ctx.font = `${R(10)}px sans-serif`; ctx.fillStyle = '#c4b5fd'; ctx.fillText(Math.round((-v.a * 180 / Math.PI + 360) % 360) + '°', x, y + R(58)); ctx.textAlign = 'left';
 }
 function drawFX(dt) {
+  ctx.globalCompositeOperation = 'lighter';
   for (let i = parts.length - 1; i >= 0; i--) { const p = parts[i]; p.l -= dt; if (p.l <= 0) { parts.splice(i, 1); continue; } p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= .97; p.vy *= .97; ctx.globalAlpha = Math.min(1, p.l * 2); ctx.fillStyle = p.c; ctx.beginPath(); ctx.arc(X(p.x), Y(p.y), R(p.r), 0, 7); ctx.fill(); }
-  ctx.globalAlpha = 1;
+  ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
   for (let i = pops.length - 1; i >= 0; i--) { const p = pops[i]; p.t += dt; if (p.t > 1) { pops.splice(i, 1); continue; } ctx.globalAlpha = 1 - p.t; ctx.strokeStyle = '#fde047'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(X(p.x), Y(p.y), R(8 + p.t * 46), 0, 7); ctx.stroke(); ctx.fillStyle = '#fde047'; ctx.font = `bold ${R(16)}px sans-serif`; ctx.textAlign = 'center'; ctx.fillText('+250 ★', X(p.x), Y(p.y - 14 - p.t * 36)); ctx.textAlign = 'left'; }
   ctx.globalAlpha = 1;
 }
@@ -378,36 +474,70 @@ function heartbeat(dt) {
 }
 
 // ---------- loop ----------
-let last = performance.now(), acc = 0;
+const MENU_HOLE = { x: 180, y: 130, m: 1, r: 30 };
+function holeK() { // close-pass factor for camera zoom, proximity for audio
+  let cp = 0, px = 0; if (!L || !ship) return [0, 0];
+  for (const h of L.holes) { const [hx, hy] = S.holePos(h, ship.t); const d = Math.hypot(ship.x - hx, ship.y - hy) - h.r * S.KILL; cp = Math.max(cp, 1 - d / (h.r * 5)); px = Math.max(px, 1 - d / (h.r * 9)); }
+  return [Math.max(0, Math.min(1, cp)), Math.max(0, Math.min(1, px))];
+}
+let last = performance.now(), acc = 0, frozen = false;
 function frame(now) {
   const dt = Math.min(0.05, (now - last) / 1000); last = now; animT += dt;
   if (L && state === 'fly') {
     if (pressT >= 0 && !braking && L.stops && ship.fuel > 0 && now - pressT >= 160) { braking = true; hud(); }
     let sdt = dt; if (slowT > 0) { slowT -= dt; sdt = dt * 0.35; }
-    acc += sdt; while (acc >= S.STEP && state === 'fly') { tick(); acc -= S.STEP; }
+    acc += sdt; while (acc >= S.STEP && state === 'fly' && !frozen) { tick(); acc -= S.STEP; }
     thrust = Math.max(0, thrust - dt); heartbeat(dt);
-    if (Math.random() < 0.6 && !braking) spark(ship.x, ship.y, 'rgba(56,189,248,.8)', 20 + Math.random() * 30, Math.atan2(-ship.vy, -ship.vx) + (Math.random() - .5) * .5);
+    if (!braking) { const spd = Math.hypot(ship.vx, ship.vy), n = (qLevel === 0 ? 1 : 2) * (0.4 + spd / 400); const ba = Math.atan2(-ship.vy, -ship.vx);
+      for (let q = 0; q < n; q++) if (Math.random() < 0.75) spark(ship.x - Math.cos(ba) * -6, ship.y - Math.sin(ba) * -6, ['rgba(56,189,248,.85)', 'rgba(167,139,250,.8)', 'rgba(255,255,255,.8)'][Math.floor(Math.random() * 3)], 20 + Math.random() * 40, ba + (Math.random() - .5) * .5); }
     hud();
   } else acc = 0;
+  if (L && (state === 'aim' || state === 'fly')) save.stats.play += dt;
   if (L && started && state === 'aim') clock += dt;
   if (L && started) $('hTime').textContent = clock.toFixed(1);
   if (L && ship) { const tgt = clampCam(ship.y); camWY += (tgt - camWY) * Math.min(1, dt * 4); parX += (((ship.x - 180) / 180) - parX) * .05; }
   shake *= Math.pow(0.02, dt);
-  ctx.save(); if (shake > .3) ctx.translate((Math.random() - .5) * shake, (Math.random() - .5) * shake);
+  // camera: smooth follow + slight zoom on close passes
+  [cpK, proxK] = holeK(); const cp = state === 'fly' ? cpK : 0;
+  const tZ = 1 + 0.13 * cp; Z += (tZ - Z) * Math.min(1, dt * (tZ > Z ? 2.2 : 1.5));
+  const zf = (Z - 1) / 0.13 * 0.45, baseCY = camWY + 320;
+  camCX = L && ship ? 180 + (ship.x - 180) * zf : 180; camCY = L && ship ? baseCY + (ship.y - baseCY) * zf : 320;
+  AU.update({ fly: state === 'fly', speed: ship && L ? Math.hypot(ship.vx, ship.vy) : 0, prox: state === 'fly' ? proxK : (L ? 0 : 0.35), tf: state === 'fly' ? (slowT > 0 ? 0.5 : tf) : 1, aiming: state === 'aim' && !!aim });
+  // auto quality
+  if (save.set.q === 'auto') { fpsT += (now - (frame.p || now)) / 1000; fpsN++; if (fpsT >= 2.5) { const fps = fpsN / fpsT; fpsT = 0; fpsN = 0;
+    if (fps < 48 && autoQ > 0) { autoQ--; resize(); syncSettings(); } else if (fps > 58.5 && autoQ < 2 && !autoUp && animT > 10) { autoUp = 1; autoQ++; resize(); syncSettings(); } } }
+  frame.p = now;
+  if (useGL && !GFX.ok) { useGL = false; resize(); }
+  const sx = shake > .3 ? (Math.random() - .5) * shake : 0, sy = shake > .3 ? (Math.random() - .5) * shake : 0;
+  lenses = [];
+  // --- scene layer (gravitationally lensed in WebGL mode) ---
+  ctx = useGL ? sctx : octx; ctx.save(); ctx.translate(sx, sy);
   drawBG(animT);
-  if (L && state !== 'menu') {
+  const inLevel = L && state !== 'menu';
+  if (inLevel) { const t = ship.t; L.fields.forEach(f => drawField(f, animT)); L.whites.forEach(w => drawWhite(w, animT)); L.holes.forEach(h => drawHoleScene(h, t)); }
+  else drawHoleScene(MENU_HOLE, animT);
+  ctx.restore();
+  // --- gameplay layer (never distorted, so positions stay readable) ---
+  if (useGL) { ctx = octx; ctx.clearRect(0, 0, W, H); }
+  ctx.save(); ctx.translate(sx, sy);
+  if (inLevel) {
     const t = ship.t;
-    L.fields.forEach(f => drawField(f, animT)); L.flares.forEach(f => drawFlare(f, t)); L.magnets.forEach(m => drawMagnet(m, animT));
+    L.flares.forEach(f => drawFlare(f, t)); L.magnets.forEach(m => drawMagnet(m, animT));
     L.planets.forEach(drawPlanet); L.asteroids.forEach(drawAsteroid); L.gates.forEach(g => drawGate(g, animT)); L.worms.forEach((w, i) => drawWorm(w, animT, i));
-    L.whites.forEach(w => drawWhite(w, animT)); L.moons.forEach(m => drawMoon(m, t)); L.holes.forEach(h => drawHole(h, t));
+    L.moons.forEach(m => drawMoon(m, t)); L.holes.forEach(h => drawHoleTop(h, t));
     drawPortal(animT); L.keys.forEach((k, i) => drawKey(k, i, animT)); L.stars.forEach((s, k) => drawStar(s, k, animT));
-    drawGhost(); drawTrail(); drawAim(); if (state !== 'fail') drawShuttle(); drawFX(dt); drawSlowmo();
+    drawGhost(); drawTrail(); drawAim(); if (state !== 'fail') drawShuttle(); drawFX(dt); if (!useGL) drawSlowmo();
   } else {
-    drawHole({ x: 180, y: 250, m: 1, r: 30 }, animT);
+    drawHoleTop(MENU_HOLE, animT);
     if (!ship) ship = { x: 0, y: 0, vx: 0, vy: 0, t: 0, broken: 0, keys: 0, flip: 1 };
-    ship.x = 180 + Math.cos(animT * .7) * 120; ship.y = 250 + Math.sin(animT * .7) * 50; ship.vx = -Math.sin(animT * .7) * 84; ship.vy = Math.cos(animT * .7) * 35; const ps = state; state = 'fly'; drawShuttle(); state = ps;
+    ship.x = 180 + Math.cos(animT * .7) * 120; ship.y = 130 + Math.sin(animT * .7) * 50; ship.vx = -Math.sin(animT * .7) * 84; ship.vy = Math.cos(animT * .7) * 35; const ps = state; state = 'fly'; drawShuttle(); state = ps;
   }
   ctx.restore();
+  if (useGL) {
+    const slowK = state === 'fly' ? (slowT > 0 ? 0.75 : Math.max(0, Math.min(1, (0.85 - tf) / 0.6))) : 0;
+    const breath = 0.0035 * (0.5 + 0.5 * Math.sin(animT * 0.9)) + (state === 'fly' ? proxK * 0.006 * Math.max(0, Math.sin(animT * (4 + proxK * 6))) : 0);
+    GFX.render(sc, { lenses, w: W, h: H, t: animT, breath, slow: slowK, bloom: qLevel === 0 ? 0 : qLevel === 2 ? 0.95 : 0.8, passes: qLevel === 2 ? 2 : 1, ca: slowK * 1.2, vig: 0.32 + slowK * 0.25 });
+  }
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
@@ -430,23 +560,50 @@ function buildLevels() {
     b.onclick = () => { if (!lock) startLevel(i); }; $('grid').appendChild(b);
   }
 }
-function toMenu() { state = 'menu'; L = null; ship = null; camWY = 0; $('hud').style.display = 'none'; $('hint').style.display = 'none'; $('hand').style.display = 'none'; $('pu').style.display = 'none';
+function toMenu() { state = 'menu'; L = null; ship = null; camWY = 0; Z = 1; camCX = 180; camCY = 320; AU.aimEnd(); persist();
+  const stn = PR.stars(save), rk = PR.rank(stn);
+  $('rank').innerHTML = `<b>${rk.name}</b><div class="bar"><i style="width:${rk.nextAt ? Math.round((stn - rk.at) / (rk.nextAt - rk.at) * 100) : 100}%"></i></div><span>${rk.next ? `до «${rk.next}»: ${rk.nextAt - stn} ★` : 'найвищий ранг'}</span>`;
+  $('score').textContent = `Загальний рахунок: ${PR.score(save).toLocaleString('uk-UA')} · досягнення ${Object.keys(save.achv).length}/${PR.ACH.length}`; $('hud').style.display = 'none'; $('hint').style.display = 'none'; $('hand').style.display = 'none'; $('pu').style.display = 'none';
   $('totalStars').textContent = `★ ${totalStars()}/150 · відкрито: ${save.unlocked}/${LEVELS.length}`;
   $('puInfo').textContent = `Бонуси: 🚀${save.pu.extra} 📡${save.pu.scan} 🛡${save.pu.shield} ⏳${save.pu.slow} · серія ★★★ ${save.streak % 4}/4`; show('menu'); }
-function syncSettings() { $('tVib').classList.toggle('on', save.set.vib); $('tSnd').classList.toggle('on', save.set.snd); $('rSfx').value = save.set.sfx; $('rMus').value = save.set.mus; }
+function syncSettings() { $('tVib').classList.toggle('on', save.set.vib); $('tSnd').classList.toggle('on', save.set.snd); $('rSfx').value = save.set.sfx; $('rMus').value = save.set.mus;
+  document.querySelectorAll('#qSeg button').forEach(b => b.classList.toggle('on', b.dataset.q === save.set.q));
+  $('qInfo').textContent = `Зараз: ${QN[qLevel]} · ${useGL ? 'WebGL (лінзування, світіння)' : 'Canvas (спрощено)'}`; AU.configure(save.set); }
+// ---------- achievements / stats ----------
+let achQ = [], achBusy = false;
+function achCheck(ev) { const got = PR.check(save, ev); if (got.length) { persist(); achQ.push(...got); if (!achBusy) achNext(); } }
+function achNext() { const a = achQ.shift(); if (!a) { achBusy = false; return; } achBusy = true; const e = $('achT'); e.style.top = (L && state !== 'menu') ? '130px' : '14px'; e.innerHTML = `<span class="ai">${a.i}</span><div><small>Досягнення відкрито</small><b>${a.n}</b></div>`; e.classList.add('on'); AU.ach(); HAP.star();
+  setTimeout(() => { e.classList.remove('on'); setTimeout(achNext, 380); }, 2300); }
+function buildAch() { const n = Object.keys(save.achv).length; $('achCount').textContent = `${n} / ${PR.ACH.length}`;
+  $('achList').innerHTML = PR.ACH.map(a => { const t = save.achv[a.id]; return `<div class="ach${t ? ' got' : ''}"><span class="ai">${t ? a.i : '🔒'}</span><div><b>${a.n}</b><small>${a.d}</small>${t ? `<em>${new Date(t).toLocaleDateString('uk-UA')}</em>` : ''}</div></div>`; }).join(''); }
+const fmtT = s => { s = Math.round(s); const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), ss = s % 60; return h ? `${h} год ${m} хв` : m ? `${m} хв ${ss} с` : `${ss} с`; };
+function buildStats() { const st = save.stats, stn = PR.stars(save), rk = PR.rank(stn), done = Object.keys(save.best).length;
+  const D = { swallowed: 'горизонт подій', moon: 'місяці', flare: 'спалахи', oob: 'відкритий космос', stranded: 'зупинка без запусків' };
+  const rows = [['Ранг', rk.name], ['Зірки', `${stn} / 150`], ['Загальний рахунок', PR.score(save).toLocaleString('uk-UA')], ['Пройдено рівнів', `${done} / ${LEVELS.length}`], ['Запуски', st.launches], ['Час у польоті', fmtT(st.flight)], ['Час у грі', fmtT(st.play)],
+    ['Перемоги / втрати', `${st.wins} / ${st.fails}`], ...Object.keys(D).filter(k => st.deaths[k]).map(k => ['  · ' + D[k], st.deaths[k]]), ['Бонусні зірки', st.bonus], ['Рикошети', st.bounces], ['Кротові нори', st.worms], ['Перемикання магнітів', st.flips], ['Використано бонусів', st.puUsed], ['Сповільнений час', fmtT(st.dilate)]];
+  let h = '<div class="rows">' + rows.map(r => `<div><span>${r[0]}</span><b>${r[1]}</b></div>`).join('') + '</div><h3>Рекорди рівнів</h3><div class="rows lvb">';
+  for (let i = 0; i < LEVELS.length; i++) { const b = save.best[i]; if (!b) continue; h += `<div><span>${i + 1}. ${LEVELS[i].n}</span><b>${'★'.repeat(b.s)}${'☆'.repeat(3 - b.s)} ${b.sc} · ${b.t ? b.t.toFixed(1) + 'с' : '—'}</b></div>`; }
+  if (!done) h += '<div><span>Ще немає пройдених рівнів</span></div>';
+  $('statBody').innerHTML = h + '</div>'; }
+$('bAch').onclick = () => { buildAch(); show('achs'); }; $('bStats').onclick = () => { buildStats(); show('stats'); };
+$('bAchBack').onclick = toMenu; $('bStatBack').onclick = toMenu;
+document.querySelectorAll('#qSeg button').forEach(b => b.onclick = () => { save.set.q = b.dataset.q; if (b.dataset.q === 'auto') { autoQ = 1; autoUp = 0; } persist(); resize(); syncSettings(); });
+document.addEventListener('pointerdown', () => AU.unlock(), true);
+document.getElementById('ui').addEventListener('click', e => { if (e.target.closest('button')) AU.click(); });
 $('bPlay').onclick = () => startLevel(Math.min(save.unlocked, LEVELS.length) - 1);
 $('bSectors').onclick = () => { buildSectors(); show('sectors'); };
 $('bSettings').onclick = () => { syncSettings(); show('settings'); };
 $('tVib').onclick = () => { save.set.vib = !save.set.vib; persist(); syncSettings(); HAP.tick(); };
 $('tSnd').onclick = () => { save.set.snd = !save.set.snd; persist(); syncSettings(); };
-$('rSfx').oninput = e => { save.set.sfx = +e.target.value; persist(); }; $('rMus').oninput = e => { save.set.mus = +e.target.value; persist(); };
+$('rSfx').oninput = e => { save.set.sfx = +e.target.value; persist(); AU.configure(save.set); }; $('rSfx').onchange = () => AU.star(2);
+$('rMus').oninput = e => { save.set.mus = +e.target.value; persist(); AU.configure(save.set); };
 $('bSetBack').onclick = toMenu; $('bBack1').onclick = toMenu; $('bBack2').onclick = () => { buildSectors(); show('sectors'); };
 $('bRestart').onclick = () => { if (started) { ghost = attempt.slice(); ghostLevel = li; } startLevel(li, true); }; $('bMenu').onclick = toMenu;
 $('bNext').onclick = () => startLevel(li + 1); $('bRetry').onclick = () => startLevel(li); $('bRetry2').onclick = () => startLevel(li, true);
 $('bLv').onclick = $('bLv2').onclick = () => { curSector = Math.floor(li / 10); buildLevels(); show('levels'); };
-toMenu();
+AU.configure(save.set); toMenu();
 window.BH = { LEVELS, startLevel, launch: (a, p) => launch(a, p), get state() { return state; }, get ship() { return ship; }, get clock() { return clock; }, toMenu, save, persist,
   advance(n, brake, tg) { braking = !!brake && ship.fuel > 0; for (let i = 0; i < n && state === 'fly'; i++) { if (tg != null && i === tg) ship.flip = -ship.flip; tick(); } braking = false; },
   runPlanStep(st) { launch(st.a, st.p); for (let i = 0; i < 2600 && state === 'fly'; i++) { if (st.tg != null && i === st.tg) ship.flip = -ship.flip; braking = st.b != null && i >= st.b && ship.fuel > 0; tick(); } braking = false; },
-  show, buildSectors, syncSettings };
+  show, buildSectors, syncSettings, buildAch, buildStats, achCheck, get gl() { return useGL; }, get quality() { return qLevel; }, get zoom() { return Z; }, freeze(b) { frozen = !!b; }, setShip(x, y, vx, vy) { ship.x = x; ship.y = y; ship.vx = vx; ship.vy = vy; } };
 })();
