@@ -1,4 +1,4 @@
-/* Blackhole Battle v3.1.8 — stage 2: visuals, sound, progress (gameplay/physics unchanged from v3.0) */
+/* Blackhole Battle v3.1.9 — stage 2: visuals, sound, progress (gameplay/physics unchanged from v3.0) */
 (() => {
 'use strict';
 const S = window.BHSim;
@@ -885,7 +885,7 @@ function frame(now) {
   const tZ = 1 + 0.13 * cp; Z += (tZ - Z) * Math.min(1, dt * (tZ > Z ? 2.2 : 1.5));
   const zf = (Z - 1) / 0.13 * 0.45, baseCY = camWY + 320;
   camCX = L && ship ? 180 + (ship.x - 180) * zf : 180; camCY = L && ship ? baseCY + (ship.y - baseCY) * zf : 320;
-  AU.update({ fly: state === 'fly', speed: ship && L ? Math.hypot(ship.vx, ship.vy) : 0, prox: state === 'fly' ? proxK : (L ? 0 : 0.35), tf: state === 'fly' ? (slowT > 0 ? 0.5 : tf) : 1, aiming: state === 'aim' && !!aim });
+  AU.update({ fly: state === 'fly', braking: braking && state === 'fly', speed: ship && L ? Math.hypot(ship.vx, ship.vy) : 0, prox: state === 'fly' ? proxK : (L ? 0 : 0.35), tf: state === 'fly' ? (slowT > 0 ? 0.5 : tf) : 1, aiming: state === 'aim' && !!aim });
   // auto quality
   if (save.set.q === 'auto') { fpsT += (now - (frame.p || now)) / 1000; fpsN++; if (fpsT >= 2.5) { const fps = fpsN / fpsT; fpsT = 0; fpsN = 0;
     if (fps < 48 && autoQ > 0) { autoQ--; resize(); syncSettings(); } else if (fps > 58.5 && autoQ < 2 && !autoUp && animT > 10) { autoUp = 1; autoQ++; resize(); syncSettings(); } } }
