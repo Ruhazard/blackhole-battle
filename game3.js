@@ -1,4 +1,4 @@
-/* Blackhole Battle v3.1.6 — stage 2: visuals, sound, progress (gameplay/physics unchanged from v3.0) */
+/* Blackhole Battle v3.1.7 — stage 2: visuals, sound, progress (gameplay/physics unchanged from v3.0) */
 (() => {
 'use strict';
 const S = window.BHSim;
@@ -15,7 +15,7 @@ const NOOP = () => {}; const AU = window.BHAudio || { unlock: NOOP, configure: N
 const PR = window.BHProg;
 let W, H, DPR, SC, OX, OY, camWY = 0, Z = 1, camCX = 180, camCY = 320, QS = 1, BGS = 1, qLevel = 1, autoQ = 1, autoUp = 0, fpsT = 0, fpsN = 0;
 const X = x => OX + (180 + (x - camCX) * Z) * SC, Y = y => OY + (320 + (y - camCY) * Z) * SC, R = v => v * SC * Z;
-let lenses = [], planetCache = {}, fl = { bounces: 0, margin: 1e9 }, cpK = 0, proxK = 0;
+const glowCache = new Map(); let lenses = [], planetCache = {}, fl = { bounces: 0, margin: 1e9 }, cpK = 0, proxK = 0;
 const QN = { get 0() { return T('q.0'); }, get 1() { return T('q.1'); }, get 2() { return T('q.2'); } };
 function rng(seed) { let s = seed >>> 0 || 1; return () => (s = (s * 1664525 + 1013904223) >>> 0) / 4294967296; }
 
@@ -108,11 +108,15 @@ function buildBG() { bgCache = {}; const k = bgKey < 0 ? 5 : bgKey; bgKey = -1; 
 function resize() {
   const dpr = window.devicePixelRatio || 1; W = innerWidth; H = innerHeight;
   qLevel = save.set.q === 'low' ? 0 : save.set.q === 'high' ? 2 : autoQ;
-  DPR = Math.min(dpr, qLevel === 0 ? 1.5 : 2); QS = Math.min(dpr, [1, 1.5, 2][qLevel]);
-  cv.width = W * DPR; cv.height = H * DPR; octx.setTransform(DPR, 0, 0, DPR, 0, 0);
-  if (useGL) { sc.width = Math.round(W * QS); sc.height = Math.round(H * QS); sctx.setTransform(QS, 0, 0, QS, 0, 0); GFX.resize(W, H, QS); glc.style.display = 'block'; BGS = QS; }
-  else { glc && (glc.style.display = 'none'); BGS = DPR; }
-  SC = Math.min(W / 360, H / 640); OX = (W - 360 * SC) / 2; OY = (H - 640 * SC) / 2; planetCache = {}; buildBG(); }
+  // v3.1.7: the gameplay layer (ship, beam, objects, text) is always drawn at (near-)native DPR so it stays crisp; quality only scales
+  // the lensed scene buffer (soft nebula background + hole backs) that is uploaded to WebGL every frame.
+  DPR = Math.min(dpr, [2, 2.5, 3][qLevel]); QS = Math.min(dpr, [1, 1.25, 1.5][qLevel]);
+  cv.width = Math.round(W * DPR); cv.height = Math.round(H * DPR); octx.setTransform(cv.width / W, 0, 0, cv.height / H, 0, 0);
+  if (useGL) { sc.width = Math.round(W * QS); sc.height = Math.round(H * QS); sctx.setTransform(sc.width / W, 0, 0, sc.height / H, 0, 0); GFX.resize(W, H, QS); glc.style.display = 'block'; }
+  else { glc && (glc.style.display = 'none'); }
+  BGS = Math.min(dpr, 1.5); // background art is soft; a fixed scale means a quality change never rebuilds it (that rebuild was a 100-400 ms hitch)
+  SC = Math.min(W / 360, H / 640); OX = (W - 360 * SC) / 2; OY = (H - 640 * SC) / 2;
+  const vk = W + 'x' + H + '@' + BGS; if (vk !== resize.vk) { resize.vk = vk; planetCache = {}; glowCache.clear(); buildBG(); } }
 addEventListener('resize', resize); resize();
 let parX = 0, parY = 0;
 function drawBG(t) {
@@ -147,8 +151,8 @@ function startLevel(i, keepGhost) {
   if (!keepGhost || ghostLevel !== i) { ghost = null; }
   hintPath = null; li = i; ensureBG(SECTORS[CAT.secOf[i]].pal); AU.theme(secTheme(CAT.secOf[i])); L = S.prep(LEVELS[i]); L.skin = resolveSkins(LID(i), L); ship = S.newShip(L); ship.ang = -Math.PI / 2;
   launchesLeft = L.L; collected = new Set(); clock = 0; started = false; resetInput();
-  trail = []; attempt = []; parts = []; pops = []; aim = null; preview = []; tf = 1; active = {}; scanArmed = false; shieldOn = false; slowT = 0;
-  planetCache = {}; camWY = clampCam(ship.y); Z = 1; camCX = 180; camCY = camWY + 320; fl = { bounces: 0, margin: 1e9 }; AU.aimEnd(); state = 'aim'; show(null); $('hud').style.display = 'flex'; $('hTime').textContent = '0.0';
+  trail = []; attempt = []; parts = []; pops = []; edgeRipples = []; aim = null; preview = []; tf = 1; active = {}; scanArmed = false; shieldOn = false; slowT = 0;
+  planetCache = {}; camWY = clampCam(ship.y); Z = 1; camCX = 180; camCY = camWY + 320; fl = { bounces: 0, margin: 1e9 }; AU.aimEnd(); state = 'aim'; show(null); $('hud').style.display = 'flex'; hudSet('hTime', 'text', '0.0');
   $('hLevel').textContent = `${i + 1}. ${lvName(i)}`; $('hTarget').textContent = L.t3 ? `3★ ≤ ${L.t3}${T('hud.sec')}` : '';
   $('chipFuel').style.display = L.stops ? '' : 'none'; syncHintBtn();
   hud(); buildPU(); requestAnimationFrame(placeAch);
@@ -156,14 +160,15 @@ function startLevel(i, keepGhost) {
   $('hand').classList.toggle('dir', save.set.aim === 'direct'); $('hand').style.display = (i === 0 && !save.tut.aim) ? 'block' : 'none';
 }
 function clampCam(y) { return L.H <= 640 ? 0 : Math.max(0, Math.min(L.H - 640, y - 380)); }
+// v3.1.7: hud() runs every flight frame; it now only touches the DOM when a value actually changed (was innerHTML rebuilds + style writes each frame)
+const hudC = {}; function hudSet(id, prop, v) { const k = id + prop; if (hudC[k] === v) return; hudC[k] = v; const e = $(id); if (prop === 'html') e.innerHTML = v; else if (prop === 'text') e.textContent = v; else if (prop === 'cls') e.classList.toggle('on', v); else e.style[prop] = v; }
 function hud() {
-  $('hL').innerHTML = T('hud.launches') + ' ' + Array.from({ length: L.L + (active.extra ? 1 : 0) }, (_, k) => `<i class="${k < launchesLeft ? '' : 'u'}"></i>`).join('');
-  $('hB').textContent = collected.size;
-  $('fuelF').style.width = (100 * ship.fuel / Math.max(0.01, S.fuelFor(L))) + '%';
-  $('chipFuel').classList.toggle('on', braking);
-  const cp = $('chipPol'); if (L.magnets.length) { cp.style.display = ''; cp.innerHTML = T(ship.flip > 0 ? 'hud.mag.norm' : 'hud.mag.inv'); } else cp.style.display = 'none';
+  const nL = L.L + (active.extra ? 1 : 0); let pips = ''; for (let k = 0; k < nL; k++) pips += `<i class="${k < launchesLeft ? '' : 'u'}"></i>`;
+  hudSet('hL', 'html', T('hud.launches') + ' ' + pips); hudSet('hB', 'text', String(collected.size));
+  hudSet('fuelF', 'width', (100 * ship.fuel / Math.max(0.01, S.fuelFor(L))).toFixed(1) + '%'); hudSet('chipFuel', 'cls', !!braking);
+  if (L.magnets.length) { hudSet('chipPol', 'display', ''); hudSet('chipPol', 'html', T(ship.flip > 0 ? 'hud.mag.norm' : 'hud.mag.inv')); } else hudSet('chipPol', 'display', 'none');
   const fx = []; if (shieldOn) fx.push(T('hud.shield')); if (scanArmed) fx.push(T('hud.scan')); if (slowT > 0) fx.push('⏳ ' + slowT.toFixed(1) + T('hud.sec'));
-  $('chipFx').style.display = fx.length ? '' : 'none'; $('chipFx').textContent = fx.join(' · ');
+  hudSet('chipFx', 'display', fx.length ? '' : 'none'); hudSet('chipFx', 'text', fx.join(' · '));
 }
 function buildPU() {
   const box = $('pu'); const owned = Object.keys(PU).filter(k => save.pu[k] > 0 || active[k]);
@@ -262,7 +267,7 @@ function computePreview(a, p) {
 }
 
 // ---------- effects ----------
-function spark(x, y, col, sp, ang) { const a = ang ?? Math.random() * 6.28, s = sp ?? 40 + Math.random() * 120; parts.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, l: 0.5 + Math.random() * 0.5, c: col, r: 1 + Math.random() * 2 }); }
+function spark(x, y, col, sp, ang) { if (parts.length > 420) parts.splice(0, parts.length - 420); const a = ang ?? Math.random() * 6.28, s = sp ?? 40 + Math.random() * 120; parts.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, l: 0.5 + Math.random() * 0.5, c: col, r: 1 + Math.random() * 2 }); }
 function burst(x, y, col, n) { for (let i = 0; i < n; i++) spark(x, y, col); }
 
 // ---------- tick ----------
@@ -400,6 +405,7 @@ function arStart(tok) { const c = $('arC'); c.style.transition = 'none'; c.style
   setTimeout(() => { if (state === 'fail' && tok === failTok) arRestart(); }, AR_MS); }
 function arRestart() { if (state !== 'fail') return; failTok++; $('arWrap').classList.remove('on'); startLevel(li, true); }
 function fail(msg, why) {
+  if (why === 'oob') edgeRipples.push({ x: ship.x, y: ship.y, t: 0, big: 1 });
   resetInput(); state = 'fail'; burst(ship.x, ship.y, '#ef4444', 40); shake = 14; HAP.death(); AU.lose();
   save.stats.fails++; save.stats.deaths[why || 'other'] = (save.stats.deaths[why || 'other'] || 0) + 1; achCheck({ type: 'fail' }); persist(); $('hud').style.display = 'none'; $('hint').style.display = 'none';
   ghost = attempt.slice(); ghostLevel = li;
@@ -410,7 +416,12 @@ function fail(msg, why) {
 }
 
 // ---------- drawing ----------
-function glow(x, y, r, col, a) { const g = ctx.createRadialGradient(x, y, 0, x, y, r); g.addColorStop(0, col.replace('A', a)); g.addColorStop(1, col.replace('A', 0)); ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.fill(); }
+// v3.1.7: glows are pre-rendered radial sprites per colour (was a new gradient object per call, dozens per frame)
+function glowSprite(col) { let c = glowCache.get(col); if (c) return c; if (glowCache.size > 96) glowCache.clear(); c = document.createElement('canvas'); c.width = c.height = 128; const x = c.getContext('2d'), g = x.createRadialGradient(64, 64, 0, 64, 64, 64);
+  g.addColorStop(0, col.replace('A', 1)); g.addColorStop(1, col.replace('A', 0)); x.fillStyle = g; x.fillRect(0, 0, 128, 128); glowCache.set(col, c); return c; }
+function glow(x, y, r, col, a) { if (!(r > 0) || !(a > 0)) return; const ga = ctx.globalAlpha; ctx.globalAlpha = ga * Math.min(1, a); ctx.drawImage(glowSprite(col), x - r, y - r, r * 2, r * 2); ctx.globalAlpha = ga; }
+let puffSpr = null; function puffSprite() { if (puffSpr) return puffSpr; puffSpr = document.createElement('canvas'); puffSpr.width = puffSpr.height = 64; const x = puffSpr.getContext('2d'), g = x.createRadialGradient(32, 32, 0, 32, 32, 32);
+  g.addColorStop(0, 'rgba(255,255,255,1)'); g.addColorStop(1, 'rgba(226,232,240,0)'); x.fillStyle = g; x.fillRect(0, 0, 64, 64); return puffSpr; }
 // black hole: scene part (lensed in WebGL) + top part (front of disk, kill ring)
 function diskStroke(x, y, r, t, from, to, a) {
   ctx.save(); ctx.translate(x, y); ctx.rotate(-0.35); const pc = ctx.globalCompositeOperation; ctx.globalCompositeOperation = 'lighter';
@@ -465,7 +476,7 @@ const PSKIN = { rocky: ['#a8a29e', '#3f3a36', '214,211,209'], mars: ['#fb923c', 
   ringed: ['#fef3c7', '#a16207', '253,230,138'], ice: ['#a5f3fc', '#155e75', '165,243,252'], sun: ['#fffbeb', '#f59e0b', '253,186,116'], neutron: ['#ffffff', '#3b82f6', '147,197,253'] };
 function planetSprite(p, i, r) {
   const sk = skinOf('planets', i); if (sk && PSKIN[sk]) return skinSprite(p, i, r, sk);
-  const key = i + '_' + Math.round(r * 10); if (planetCache[key]) return planetCache[key];
+  const key = i + '_' + Math.round(r * 10) + '@' + DPR; if (planetCache[key]) return planetCache[key];
   const [c1, c2, rgb] = PCOL[(Math.round(p[0] + p[1]) + i) % PCOL.length]; const d = Math.ceil(r * 2 * DPR) + 2; const rr = rng(Math.round(p[0] * 7 + p[1] * 13 + i));
   const body = document.createElement('canvas'); body.width = body.height = d; const b = body.getContext('2d'); b.scale(DPR, DPR); const cr = r;
   b.save(); b.beginPath(); b.arc(cr + .5, cr + .5, cr, 0, 7); b.clip();
@@ -481,7 +492,7 @@ function planetSprite(p, i, r) {
   return planetCache[key] = { body, cl, rgb, ring: (p[2] > 45 || (i + Math.round(p[0])) % 4 === 1) && clear() };
 }
 function skinSprite(p, i, r, sk) {
-  const key = i + '_' + Math.round(r * 10) + sk; if (planetCache[key]) return planetCache[key];
+  const key = i + '_' + Math.round(r * 10) + sk + '@' + DPR; if (planetCache[key]) return planetCache[key];
   const [c1, c2, rgb] = PSKIN[sk], d = Math.ceil(r * 2 * DPR) + 2, rr = rng(Math.round(p[0] * 7 + p[1] * 13 + i)), cr = r;
   const body = document.createElement('canvas'); body.width = body.height = d; const b = body.getContext('2d'); b.scale(DPR, DPR);
   b.save(); b.beginPath(); b.arc(cr + .5, cr + .5, cr, 0, 7); b.clip();
@@ -513,11 +524,11 @@ function ringArc(x, y, r, from, to) {
   ctx.restore();
 }
 function drawPlanet(p, i) {
-  const x = X(p[0]), y = Y(p[1]), r = R(p[2]); const sp = planetSprite(p, i, r); const lt = lightAt(p[0], p[1]);
+  const x = X(p[0]), y = Y(p[1]), r = R(p[2]), rs = Math.round(p[2] * SC * 1.14 * 4) / 4, sf = r / rs; const sp = planetSprite(p, i, rs); const lt = lightAt(p[0], p[1]); // v3.1.7: sprite built once at max-zoom size (was rebuilt every frame while the camera zoomed)
   glow(x, y, r * (sp.self ? 2.6 : 1.45), `rgba(${sp.rgb},A)`, sp.self ? .6 : .3);
   if (sp.sk === 'neutron') neutronBeams(x, y, r, '147,197,253');
   if (sp.ring) ringArc(x, y, r, Math.PI, Math.PI * 2);
-  ctx.drawImage(sp.body, x - r - .5, y - r - .5, sp.body.width / DPR, sp.body.height / DPR);
+  ctx.drawImage(sp.body, x - (rs + .5) * sf, y - (rs + .5) * sf, sp.body.width / DPR * sf, sp.body.height / DPR * sf);
   ctx.save(); ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.clip();
   const off = ((animT * r * .06) % (r * 2)); ctx.drawImage(sp.cl, x - r - off, y - r, r * 4, r * 2); ctx.drawImage(sp.cl, x + r * 3 - off, y - r, r * 4, r * 2);
   if (!sp.self) { // terminator shadow (night side away from the light)
@@ -551,19 +562,40 @@ function rectPath(a, i, jag) {
   const w = R(a[2]), h = R(a[3]); const r = rng(i * 97 + 13); const n = Math.max(6, Math.round(a[2] / 10));
   ctx.beginPath(); for (let k = 0; k <= n; k++) ctx.lineTo(-w / 2 + w * k / n, -h / 2 - (jag ? r() * h * .25 : 0)); for (let k = n; k >= 0; k--) ctx.lineTo(-w / 2 + w * k / n, h / 2 + (jag ? r() * h * .25 : 0)); ctx.closePath();
 }
+// v3.1.7: asteroid bodies (gradient, craters, strata, 3D shading) are pre-rendered once per level into a sprite at max-zoom size;
+// only the animated bits (ice glints, metal sheen, crack lines) are drawn live. The per-frame clip + ~80 crater paths were the boss-level hitch.
+function astPaint(a, i, ask, live) {
+  const w = R(a[2]), h = R(a[3]), n = Math.max(4, Math.round(a[2] / 14));
+  if (!live) { rectPath(a, i, true); const g = ctx.createLinearGradient(0, -h * .75, 0, h * .75);
+    const AC = ask === 'ice' ? ['#f0f9ff', '#7dd3fc', '#0c4a6e', 'rgba(224,242,254,.9)'] : ask === 'metal' ? ['#f1f5f9', '#64748b', '#0f172a', 'rgba(203,213,225,.8)'] : [a[5] ? '#d6d3d1' : '#a8a29e', '#57534e', '#292524', a[5] ? 'rgba(250,250,250,.8)' : 'rgba(253,186,116,.5)'];
+    g.addColorStop(0, AC[0]); g.addColorStop(.5, AC[1]); g.addColorStop(1, AC[2]); ctx.fillStyle = g; ctx.fill(); ctx.strokeStyle = AC[3]; ctx.lineWidth = 1; ctx.stroke(); }
+  if (live && ask !== 'ice' && ask !== 'metal') return;
+  ctx.save(); rectPath(a, i, true); ctx.clip(); const q = rng(i * 31 + 7);
+  if (ask === 'ice') { if (!live) { ctx.fillStyle = 'rgba(255,255,255,.55)'; for (let k = 0; k < n * 2; k++) ctx.fillRect(-w / 2 + q() * w, -h / 2 + q() * h * .5, R(1.4), R(1.4)); } // frost
+    else { for (let k = 0; k < n * 2; k++) { q(); q(); } for (let k = 0; k < n; k++) { const gx = -w / 2 + q() * w, gy = -h / 2 + q() * h, tw = Math.max(0, Math.sin(animT * 3 + k * 2.3)); if (tw > .6) { const s2 = R(4) * tw; ctx.fillStyle = `rgba(255,255,255,${tw})`; ctx.fillRect(gx - s2, gy - .5, s2 * 2, 1); ctx.fillRect(gx - .5, gy - s2, 1, s2 * 2); } } } } // glints
+  else if (ask === 'metal') { if (!live) { ctx.fillStyle = 'rgba(255,255,255,.35)'; ctx.fillRect(-w / 2, -h * .28, w, R(1.6)); ctx.fillStyle = 'rgba(15,23,42,.7)'; for (let k = 0; k < n; k++) { ctx.beginPath(); ctx.arc(-w / 2 + (k + .5) * w / n, h * .15, R(1.3), 0, 7); ctx.fill(); } }
+    else { const sx = ((animT * .25 + i * .37) % 1.6 - .3) * w - w / 2; const sg = ctx.createLinearGradient(sx - R(10), 0, sx + R(10), 0); sg.addColorStop(0, 'rgba(255,255,255,0)'); sg.addColorStop(.5, 'rgba(255,255,255,.35)'); sg.addColorStop(1, 'rgba(255,255,255,0)'); ctx.fillStyle = sg; ctx.fillRect(sx - R(10), -h, R(20), h * 2); } }
+  else { for (let k = 0; k < n * 2; k++) { const cx = -w / 2 + q() * w, cy = -h * .4 + q() * h * .8, cr = R(1.2 + q() * 2.6); // craters: dark pit + lit lower rim
+      ctx.fillStyle = 'rgba(28,25,23,.5)'; ctx.beginPath(); ctx.arc(cx, cy, cr, 0, 7); ctx.fill(); ctx.strokeStyle = 'rgba(245,245,244,.22)'; ctx.lineWidth = Math.max(.6, cr * .3); ctx.beginPath(); ctx.arc(cx, cy, cr, .3, Math.PI - .3); ctx.stroke(); }
+    ctx.fillStyle = 'rgba(255,255,255,.05)'; for (let k = 0; k < n; k++) { ctx.beginPath(); ctx.ellipse(-w / 2 + q() * w, -h * .1 + q() * h * .3, R(6 + q() * 10), R(1 + q() * 1.5), 0, 0, 7); ctx.fill(); } } // strata
+  if (!live) { const sh = ctx.createLinearGradient(0, -h * .75, 0, h * .75); sh.addColorStop(0, 'rgba(255,250,240,.28)'); sh.addColorStop(.22, 'rgba(255,250,240,0)'); sh.addColorStop(.62, 'rgba(0,0,0,0)'); sh.addColorStop(1, 'rgba(0,0,0,.55)');
+    ctx.fillStyle = sh; ctx.fillRect(-w / 2 - R(4), -h, w + R(8), h * 2); } // top light / bottom shadow -> reads as a 3D rock
+  ctx.restore();
+}
+const AST_ZMAX = 1.14;
+function asteroidSprite(a, i, ask) {
+  const key = 'ast' + i + (ask || '') + '@' + DPR + '_' + Math.round(SC * 1000); if (planetCache[key]) return planetCache[key];
+  const z0 = Z; Z = AST_ZMAX; const pw = R(a[2]) + 8, ph = R(a[3]) * 1.6 + 8, c = document.createElement('canvas'); c.width = Math.ceil(pw * DPR); c.height = Math.ceil(ph * DPR);
+  const old = ctx; ctx = c.getContext('2d'); ctx.scale(DPR, DPR); ctx.translate(pw / 2, ph / 2);
+  try { astPaint(a, i, ask, false); } finally { ctx = old; Z = z0; }
+  return planetCache[key] = { c, pw, ph };
+}
 function drawAsteroid(a, i) {
   if (a[5] && (ship.broken >> i) & 1) return;
-  ctx.save(); ctx.translate(X(a[0]), Y(a[1])); ctx.rotate(a[4]); rectPath(a, i, true);
-  const ask = skinOf('asteroids', i), g = ctx.createLinearGradient(0, -R(a[3]), 0, R(a[3]));
-  const AC = ask === 'ice' ? ['#f0f9ff', '#7dd3fc', '#0c4a6e', 'rgba(224,242,254,.9)'] : ask === 'metal' ? ['#f1f5f9', '#64748b', '#0f172a', 'rgba(203,213,225,.8)'] : [a[5] ? '#d6d3d1' : '#a8a29e', '#57534e', '#292524', a[5] ? 'rgba(250,250,250,.8)' : 'rgba(253,186,116,.5)'];
-  g.addColorStop(0, AC[0]); g.addColorStop(.5, AC[1]); g.addColorStop(1, AC[2]); ctx.fillStyle = g; ctx.fill(); ctx.strokeStyle = AC[3]; ctx.lineWidth = 1; ctx.stroke();
-  if (ask === 'ice' || ask === 'metal' || !ask) { ctx.save(); ctx.clip(); const w = R(a[2]), h = R(a[3]), q = rng(i * 31 + 7), n = Math.max(4, Math.round(a[2] / 14));
-    if (ask === 'ice') { ctx.fillStyle = 'rgba(255,255,255,.55)'; for (let k = 0; k < n * 2; k++) ctx.fillRect(-w / 2 + q() * w, -h / 2 + q() * h * .5, R(1.4), R(1.4)); // frost
-      for (let k = 0; k < n; k++) { const gx = -w / 2 + q() * w, gy = -h / 2 + q() * h, tw = Math.max(0, Math.sin(animT * 3 + k * 2.3)); if (tw > .6) { const s2 = R(4) * tw; ctx.fillStyle = `rgba(255,255,255,${tw})`; ctx.fillRect(gx - s2, gy - .5, s2 * 2, 1); ctx.fillRect(gx - .5, gy - s2, 1, s2 * 2); } } } // glints
-    else if (ask === 'metal') { ctx.fillStyle = 'rgba(255,255,255,.35)'; ctx.fillRect(-w / 2, -h * .28, w, R(1.6)); ctx.fillStyle = 'rgba(15,23,42,.7)'; for (let k = 0; k < n; k++) { ctx.beginPath(); ctx.arc(-w / 2 + (k + .5) * w / n, h * .15, R(1.3), 0, 7); ctx.fill(); }
-      const sx = ((animT * .25 + i * .37) % 1.6 - .3) * w - w / 2; const sg = ctx.createLinearGradient(sx - R(10), 0, sx + R(10), 0); sg.addColorStop(0, 'rgba(255,255,255,0)'); sg.addColorStop(.5, 'rgba(255,255,255,.35)'); sg.addColorStop(1, 'rgba(255,255,255,0)'); ctx.fillStyle = sg; ctx.fillRect(sx - R(10), -h, R(20), h * 2); }
-    else { ctx.fillStyle = 'rgba(41,37,36,.45)'; for (let k = 0; k < n; k++) { ctx.beginPath(); ctx.arc(-w / 2 + q() * w, -h / 2 + q() * h, R(1.2 + q() * 2), 0, 7); ctx.fill(); } } // rock pits
-    ctx.restore(); }
+  const ask = skinOf('asteroids', i), sp = asteroidSprite(a, i, ask), f = Z / AST_ZMAX;
+  ctx.save(); ctx.translate(X(a[0]), Y(a[1])); ctx.rotate(a[4]);
+  ctx.drawImage(sp.c, -sp.pw / 2 * f, -sp.ph / 2 * f, sp.pw * f, sp.ph * f);
+  astPaint(a, i, ask, true);
   if (a[5]) { ctx.strokeStyle = 'rgba(255,255,255,.85)'; ctx.lineWidth = 1.5; const w = R(a[2]); ctx.beginPath(); for (let k = -2; k <= 2; k++) { ctx.moveTo(k * w / 6, -R(a[3]) / 2); ctx.lineTo(k * w / 6 + R(5), 0); ctx.lineTo(k * w / 6 - R(3), R(a[3]) / 2); } ctx.stroke(); }
   ctx.restore();
 }
@@ -624,8 +656,10 @@ function drawStar(s, k, t) {
   if (collected.has(k)) return; const x = X(s[0]), y = Y(s[1]), p = 1 + Math.sin(t * 4 + k) * .18; glow(x, y, R(22) * p, 'rgba(253,224,71,A)', .45);
   ctx.save(); ctx.translate(x, y); ctx.rotate(t * .9 + k); ctx.scale(p, p); ctx.beginPath(); for (let i = 0; i < 10; i++) { const rr = R(i % 2 ? 5 : 11), a = i * Math.PI / 5 - Math.PI / 2; ctx.lineTo(Math.cos(a) * rr, Math.sin(a) * rr); } ctx.closePath(); ctx.fillStyle = '#fde047'; ctx.fill(); ctx.restore();
 }
+// v3.1.7: the ship is drawn a bit larger while aiming so it reads clearly at small scales; visual only, the hitbox is unchanged
+let shipVis = 1.3; const shipVisT = () => (state === 'aim' ? 1.32 : 1.12);
 function drawShuttle() {
-  const x = X(ship.x), y = Y(ship.y);
+  const x = X(ship.x), y = Y(ship.y); shipVis += (shipVisT() - shipVis) * Math.min(1, (drawShuttle.dt || .016) * 6);
   const ang = state === 'fly' && Math.hypot(ship.vx, ship.vy) > 2 ? Math.atan2(ship.vy, ship.vx) : aim ? aimVec().a : ship.ang; ship.ang = ang;
   // spaghettification: stretch toward the nearest hole
   let sp = 0, sa = 0; if (L) for (const h of L.holes) { const [hx, hy] = S.holePos(h, ship.t); const d = Math.hypot(hx - ship.x, hy - ship.y); const k = Math.max(0, 1 - (d - h.r * S.KILL) / (h.r * 3.5)); if (k > sp) { sp = k; sa = Math.atan2(hy - ship.y, hx - ship.x); } }
@@ -637,7 +671,7 @@ function drawShuttle() {
 function drawHull(x, y, ang, st, sa, lt, ghostly, kk, kind) {
   ctx.save(); ctx.translate(x, y);
   if (st > 1.01) { ctx.rotate(sa); ctx.scale(st, 1 / Math.sqrt(st)); ctx.rotate(-sa); }
-  ctx.rotate(ang); const k = kk || R(1), rd = (kind || save.set.ship) === 'roadster';
+  ctx.rotate(ang); const k = kk || R(1) * shipVis, rd = (kind || save.set.ship) === 'roadster';
   if (rd) { if (shieldOn && !ghostly && !kk) { ctx.strokeStyle = `rgba(103,232,249,${.5 + .3 * Math.sin(animT * 6)})`; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(0, 0, 17 * k, 0, 7); ctx.stroke(); } drawRoadster(k, lt, ghostly); ctx.restore(); return; }
   const fl0 = !kk && state === 'fly' && !braking ? 0.6 + thrust * 2 : state === 'aim' ? 0.25 : 0;
   if (fl0 > 0 && !ghostly) { const pc = ctx.globalCompositeOperation; ctx.globalCompositeOperation = 'lighter'; const len = (14 + Math.random() * 6) * fl0 * k; const g = ctx.createLinearGradient(-8 * k, 0, -8 * k - len, 0); g.addColorStop(0, 'rgba(255,255,255,.95)'); g.addColorStop(.3, 'rgba(56,189,248,.9)'); g.addColorStop(1, 'rgba(124,58,237,0)'); ctx.fillStyle = g; ctx.beginPath(); ctx.moveTo(-8 * k, -3.5 * k); ctx.quadraticCurveTo(-8 * k - len, 0, -8 * k, 3.5 * k); ctx.fill();
@@ -691,7 +725,7 @@ function roadsterJets() { const a = ship.ang, ca = Math.cos(a), sa = Math.sin(a)
   if (thrust > 0.02) for (const s of [-2.2, 2.2]) for (let q = 0; q < 2; q++) { const [x, y] = W(-12, s); const j = (Math.random() - .5) * .5; puff(x, y, ship.vx * .3 - Math.cos(a + j) * (70 + Math.random() * 60), ship.vy * .3 - Math.sin(a + j) * (70 + Math.random() * 60)); }
   if (braking) for (const s of [-4.2, 4.2]) { const [x, y] = W(14, s); const j = (Math.random() - .5) * .6 + s * .04; puff(x, y, ship.vx * .2 + Math.cos(a + j) * (60 + Math.random() * 50), ship.vy * .2 + Math.sin(a + j) * (60 + Math.random() * 50)); } }
 let pcv = null;
-function drawShipPrev() { const c = $('shipPrev'); if (!c) return; const d = Math.min(2, window.devicePixelRatio || 1); if (c.width !== 132 * d) { c.width = 132 * d; c.height = 56 * d; } const old = ctx; ctx = c.getContext('2d'); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, c.width, c.height);
+function drawShipPrev() { const c = $('shipPrev'); if (!c) return; const d = Math.min(3, window.devicePixelRatio || 1); if (c.width !== 132 * d) { c.width = 132 * d; c.height = 56 * d; } const old = ctx; ctx = c.getContext('2d'); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, c.width, c.height);
   const rd = save.set.ship === 'roadster', k = 2.6 * d, x = 70 * d, y = 28 * d;
   if (rd) for (let i = 0; i < 9; i++) { const ph = (animT * 1.4 + i / 9) % 1; for (const s of [-2.2, 2.2]) { const r = (1.5 + ph * 7) * k * .6; ctx.fillStyle = `rgba(255,255,255,${.5 * (1 - ph)})`; ctx.beginPath(); ctx.arc(x - (12 + ph * 16) * k, y + (s + s * ph * .8) * k, r, 0, 7); ctx.fill(); } }
   drawHull(x, y, 0, 1, 0, null, false, k, save.set.ship); ctx = old; }
@@ -713,48 +747,93 @@ function drawAim() {
   if (aim.ang == null) { const p = (Math.sin(animT * 6) + 1) / 2; ctx.strokeStyle = `rgba(233,213,255,${.25 + p * .3})`; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(x, y, R(22), 0, 7); ctx.stroke(); }
   const k = v.pct / 100, col = powerCol(k);
   // power ring
-  ctx.lineCap = 'round'; ctx.strokeStyle = 'rgba(255,255,255,.08)'; ctx.lineWidth = R(3); ctx.beginPath(); ctx.arc(x, y, R(21), 0, 7); ctx.stroke();
+  ctx.lineCap = 'round'; ctx.strokeStyle = 'rgba(255,255,255,.08)'; ctx.lineWidth = R(3); ctx.beginPath(); ctx.arc(x, y, R(21 * Math.max(1, shipVis * .92)), 0, 7); ctx.stroke();
   const pc = ctx.globalCompositeOperation; ctx.globalCompositeOperation = 'lighter';
-  ctx.strokeStyle = `rgba(${col},.35)`; ctx.lineWidth = R(6); ctx.beginPath(); ctx.arc(x, y, R(21), -Math.PI / 2, -Math.PI / 2 + k * 6.283); ctx.stroke();
-  ctx.strokeStyle = `rgb(${col})`; ctx.lineWidth = R(2.2); ctx.beginPath(); ctx.arc(x, y, R(21), -Math.PI / 2, -Math.PI / 2 + k * 6.283); ctx.stroke(); ctx.globalCompositeOperation = pc; ctx.lineCap = 'butt';
-  ctx.fillStyle = `rgb(${col})`; ctx.font = `bold ${R(15)}px sans-serif`; ctx.textAlign = 'center'; ctx.fillText(v.pct + '%', x, y + R(46));
-  ctx.font = `${R(10)}px sans-serif`; ctx.fillStyle = aim.fine ? '#fde68a' : '#c4b5fd'; ctx.fillText((aim.ang != null ? Math.round((-v.a * 180 / Math.PI + 360) % 360) + '°' : '') + (aim.fine ? T('aim.fine') : ''), x, y + R(58)); ctx.textAlign = 'left';
+  ctx.strokeStyle = `rgba(${col},.35)`; ctx.lineWidth = R(6); ctx.beginPath(); ctx.arc(x, y, R(21 * Math.max(1, shipVis * .92)), -Math.PI / 2, -Math.PI / 2 + k * 6.283); ctx.stroke();
+  ctx.strokeStyle = `rgb(${col})`; ctx.lineWidth = R(2.2); ctx.beginPath(); ctx.arc(x, y, R(21 * Math.max(1, shipVis * .92)), -Math.PI / 2, -Math.PI / 2 + k * 6.283); ctx.stroke(); ctx.globalCompositeOperation = pc; ctx.lineCap = 'butt';
+  const [tx, ty] = readoutPos(x, y, v.a); ctx.fillStyle = `rgb(${col})`; ctx.font = `bold ${Math.max(13, R(15))}px sans-serif`; ctx.textAlign = 'center'; ctx.fillText(v.pct + '%', tx, ty);
+  ctx.font = `${Math.max(11, R(10))}px sans-serif`; ctx.fillStyle = aim.fine ? '#fde68a' : '#c4b5fd'; ctx.fillText((aim.ang != null ? Math.round((-v.a * 180 / Math.PI + 360) % 360) + '°' : '') + (aim.fine ? T('aim.fine') : ''), tx, ty + Math.max(13, R(12))); ctx.textAlign = 'left';
 }
+// v3.1.7: power/angle readout: below the ring by default; if that would leave the screen (ship near the bottom edge) or sit on the beam,
+// try above / left / right. Returns the baseline of the first line; the block is ~2 lines tall and clamped inside the viewport.
+function readoutPos(x, y, a) { const d = R(46 * Math.max(1, shipVis * .92)), lh = Math.max(13, R(12)), hb = Math.max(15, R(15)), half = Math.max(48, R(40)), ca = Math.cos(a), sa = Math.sin(a);
+  const C = [[0, 1], [0, -1], [-1, 0], [1, 0]].filter(([dx, dy]) => dx * ca + dy * sa < .55);
+  for (const [dx, dy] of C) { const tx = x + dx * (d + half * .6), ty = y + dy * d + (dy < 0 ? -lh : dx ? -lh * .3 : 0);
+    if (ty - hb >= 4 && ty + lh + 4 <= H && tx - half >= 2 && tx + half <= W - 2) return [tx, ty]; }
+  const [dx, dy] = C[0] || [0, -1]; return [Math.max(half, Math.min(W - half, x + dx * (d + half * .6))), Math.max(hb + 4, Math.min(H - lh - 6, y + dy * d))]; }
 function powerCol(k) { // teal -> violet -> gold -> rose
   const st = [[0, [94, 234, 212]], [.45, [167, 139, 250]], [.75, [253, 224, 71]], [1, [251, 113, 133]]]; let i = 0; while (i < st.length - 2 && k > st[i + 1][0]) i++;
   const [k0, c0] = st[i], [k1, c1] = st[i + 1], f = Math.max(0, Math.min(1, (k - k0) / (k1 - k0))); return c0.map((c, j) => Math.round(c + (c1[j] - c) * f)).join(',');
 }
 let beamParts = [];
+// v3.1.7 beam: clean tapered core + soft glow + a few subtle sparkles, all vector paths on the full-DPR gameplay layer.
+// It starts exactly at the hull's nose (13 hull units for the shuttle, 14 for the roadster, times the visual scale) along the aim angle.
+function noseOffset() { return (save.set.ship === 'roadster' ? 14 : 13) * shipVis; }
+function taper(x0, y0, ca, sa, len, hw) { const px = -sa * hw, py = ca * hw, x1 = x0 + ca * len, y1 = y0 + sa * len;
+  ctx.beginPath(); ctx.moveTo(x0 + px, y0 + py); ctx.quadraticCurveTo(x0 + ca * len * .5 + px * .7, y0 + sa * len * .5 + py * .7, x1, y1);
+  ctx.quadraticCurveTo(x0 + ca * len * .5 - px * .7, y0 + sa * len * .5 - py * .7, x0 - px, y0 - py); ctx.arc(x0, y0, hw, Math.atan2(-py, -px), Math.atan2(py, px), false); ctx.closePath(); }
 function drawBeam(v) {
   const k = v.pct / 100, col = powerCol(k), a = v.a, ca = Math.cos(a), sa = Math.sin(a);
-  const len = (L.stub === 2 ? 64 : 34) * (0.5 + v.pct / 200), x0 = ship.x + ca * 10, y0 = ship.y + sa * 10, x1 = x0 + ca * len, y1 = y0 + sa * len;
-  const px = -sa, py = ca, w0 = 5.5 + k * 3, fl = 1 + Math.sin(animT * 22) * .06 + Math.sin(animT * 37) * .04;
+  const len = R((L.stub === 2 ? 84 : 46) * (0.55 + v.pct / 220)), no = R(noseOffset()), x0 = X(ship.x) + ca * no, y0 = Y(ship.y) + sa * no, x1 = x0 + ca * len, y1 = y0 + sa * len;
+  const hw = R(1.6 + k * 1.3) * (1 + Math.sin(animT * 18) * .04);
   const pc = ctx.globalCompositeOperation; ctx.globalCompositeOperation = 'lighter';
-  // outer plume (soft, tapered)
-  const plume = (w, alpha) => { const g = ctx.createLinearGradient(X(x0), Y(y0), X(x1), Y(y1)); g.addColorStop(0, `rgba(${col},${alpha})`); g.addColorStop(.7, `rgba(${col},${alpha * .45})`); g.addColorStop(1, `rgba(${col},0)`);
-    ctx.fillStyle = g; ctx.beginPath(); ctx.moveTo(X(x0 + px * w), Y(y0 + py * w)); ctx.quadraticCurveTo(X(x0 + ca * len * .55 + px * w * .8), Y(y0 + sa * len * .55 + py * w * .8), X(x1), Y(y1));
-    ctx.quadraticCurveTo(X(x0 + ca * len * .55 - px * w * .8), Y(y0 + sa * len * .55 - py * w * .8), X(x0 - px * w), Y(y0 - py * w)); ctx.closePath(); ctx.fill(); };
-  plume(w0 * 2.2 * fl, .16); plume(w0 * fl, .45); plume(w0 * .38, .95);
-  // hot white core
-  const cg = ctx.createLinearGradient(X(x0), Y(y0), X(x1), Y(y1)); cg.addColorStop(0, 'rgba(255,255,255,.95)'); cg.addColorStop(1, 'rgba(255,255,255,0)');
-  ctx.strokeStyle = cg; ctx.lineWidth = R(1.4); ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(X(x0), Y(y0)); ctx.lineTo(X(x0 + ca * len * .85), Y(y0 + sa * len * .85)); ctx.stroke(); ctx.lineCap = 'butt';
-  // tip spark
-  const tx = x0 + ca * len * .82, ty = y0 + sa * len * .82; glow(X(tx), Y(ty), R(7 + k * 5), `rgba(${col},A)`, .55);
-  ctx.strokeStyle = 'rgba(255,255,255,.7)'; ctx.lineWidth = 1; ctx.beginPath(); const sp = R(4 + k * 3) * (0.8 + Math.sin(animT * 9) * .2);
-  ctx.moveTo(X(tx) - sp, Y(ty)); ctx.lineTo(X(tx) + sp, Y(ty)); ctx.moveTo(X(tx), Y(ty) - sp); ctx.lineTo(X(tx), Y(ty) + sp); ctx.stroke();
-  // sparkles streaming along the beam
-  const n = qLevel === 0 ? 1 : 2; for (let q = 0; q < n; q++) beamParts.push({ f: Math.random() * .2, o: (Math.random() - .5) * w0 * 1.4, v: .9 + Math.random() * 1.4, l: 1, s: .6 + Math.random() * 1.4 });
-  for (let i = beamParts.length - 1; i >= 0; i--) { const b = beamParts[i]; b.f += b.v * 0.016; b.l -= 0.028; b.o *= .985; if (b.f > 1.15 || b.l <= 0) { beamParts.splice(i, 1); continue; }
-    const bx = x0 + ca * len * b.f + px * b.o * (1 - b.f * .6), by = y0 + sa * len * b.f + py * b.o * (1 - b.f * .6); ctx.fillStyle = `rgba(${b.f > .6 ? '255,255,255' : col},${b.l * (1.1 - b.f)})`; ctx.beginPath(); ctx.arc(X(bx), Y(by), R(b.s * .7), 0, 7); ctx.fill(); }
-  if (beamParts.length > 90) beamParts.splice(0, beamParts.length - 90);
+  const grad = (a0, a1) => { const g = ctx.createLinearGradient(x0, y0, x1, y1); g.addColorStop(0, `rgba(${col},${a0})`); g.addColorStop(.65, `rgba(${col},${a1})`); g.addColorStop(1, `rgba(${col},0)`); return g; };
+  ctx.fillStyle = grad(.16, .07); taper(x0, y0, ca, sa, len * 1.04, hw * 3.4); ctx.fill();      // soft outer glow
+  ctx.fillStyle = grad(.38, .18); taper(x0, y0, ca, sa, len, hw * 1.9); ctx.fill();             // inner glow
+  const cg = ctx.createLinearGradient(x0, y0, x1, y1); cg.addColorStop(0, 'rgba(255,255,255,.95)'); cg.addColorStop(.55, `rgba(${col},.85)`); cg.addColorStop(1, `rgba(${col},0)`);
+  ctx.fillStyle = cg; taper(x0, y0, ca, sa, len * .96, hw * .62); ctx.fill();                    // hot core
+  glow(x0, y0, hw * 3, 'rgba(255,255,255,A)', .35);                                              // nozzle bloom
+  // subtle sparkles drifting along the beam (tiny round dots, low alpha)
+  if (beamParts.length < (qLevel === 0 ? 6 : 12) && Math.random() < .5) beamParts.push({ f: Math.random() * .15, o: (Math.random() - .5) * 2, v: .7 + Math.random() * .9, l: 1, s: .5 + Math.random() * .6 });
+  const dt = drawShuttle.dt || .016;
+  for (let i = beamParts.length - 1; i >= 0; i--) { const b = beamParts[i]; b.f += b.v * dt; b.l -= dt * 1.4; if (b.f > 1 || b.l <= 0) { beamParts.splice(i, 1); continue; }
+    const o = b.o * hw * 1.6 * (1 - b.f), bx = x0 + ca * len * b.f - sa * o, by = y0 + sa * len * b.f + ca * o;
+    ctx.fillStyle = `rgba(255,255,255,${(.45 * b.l * (1 - b.f)).toFixed(3)})`; ctx.beginPath(); ctx.arc(bx, by, R(b.s), 0, 7); ctx.fill(); }
   ctx.globalCompositeOperation = pc;
   // faint pull band (shows drag, not the path)
-  const bx = ship.x - ca * v.p * 0.45, by = ship.y - sa * v.p * 0.45; const pg = ctx.createLinearGradient(X(ship.x), Y(ship.y), X(bx), Y(by)); pg.addColorStop(0, `rgba(${col},.35)`); pg.addColorStop(1, `rgba(${col},0)`);
-  ctx.strokeStyle = pg; ctx.lineWidth = R(1.6); ctx.setLineDash([2, 5]); ctx.beginPath(); ctx.moveTo(X(ship.x), Y(ship.y)); ctx.lineTo(X(bx), Y(by)); ctx.stroke(); ctx.setLineDash([]);
+  const t0 = noseOffset() * .75, sx0 = ship.x - ca * t0, sy0 = ship.y - sa * t0, bx = sx0 - ca * v.p * 0.45, by = sy0 - sa * v.p * 0.45; const pg = ctx.createLinearGradient(X(sx0), Y(sy0), X(bx), Y(by)); pg.addColorStop(0, `rgba(${col},.35)`); pg.addColorStop(1, `rgba(${col},0)`);
+  ctx.strokeStyle = pg; ctx.lineWidth = R(1.6); ctx.setLineDash([R(2), R(5)]); ctx.beginPath(); ctx.moveTo(X(sx0), Y(sy0)); ctx.lineTo(X(bx), Y(by)); ctx.stroke(); ctx.setLineDash([]);
 }
+// ---------- v3.1.7 playfield boundary: energy barrier exactly on the out-of-bounds limit (sim3: x<-OOB, x>W+OOB, y<-OOB, y>H+OOB) ----------
+const OOB = 40; let edgeRipples = [], edgeNearT = 0;
+function edgeRect() { return [X(-OOB), Y(-OOB), X(L.W + OOB), Y(L.H + OOB)]; }
+function drawBorder() {
+  const [x0, y0, x1, y1] = edgeRect(), dt = drawShuttle.dt || .016, pc = ctx.globalCompositeOperation;
+  // darker space outside the field
+  ctx.fillStyle = 'rgba(3,1,14,.5)'; ctx.beginPath(); ctx.rect(-50, -50, W + 100, H + 100); ctx.rect(x0, y0, x1 - x0, y1 - y0); ctx.fill('evenodd');
+  // soft violet haze just outside each visible edge
+  const hz = Math.max(10, R(22)); ctx.globalCompositeOperation = 'lighter';
+  const band = (gx0, gy0, gx1, gy1, rx, ry, rw, rh) => { const g = ctx.createLinearGradient(gx0, gy0, gx1, gy1); g.addColorStop(0, 'rgba(139,92,246,.16)'); g.addColorStop(1, 'rgba(139,92,246,0)'); ctx.fillStyle = g; ctx.fillRect(rx, ry, rw, rh); };
+  if (x0 > -hz) band(x0, 0, x0 - hz, 0, x0 - hz, y0, hz, y1 - y0); if (x1 < W + hz) band(x1, 0, x1 + hz, 0, x1, y0, hz, y1 - y0);
+  if (y0 > -hz) band(0, y0, 0, y0 - hz, x0, y0 - hz, x1 - x0, hz); if (y1 < H + hz) band(0, y1, 0, y1 + hz, x0, y1, x1 - x0, hz);
+  // neon line + slow travelling energy dashes
+  const pulse = .5 + .5 * Math.sin(animT * 1.7), lw = Math.max(1, R(1.1));
+  ctx.strokeStyle = `rgba(167,139,250,${(.42 + .18 * pulse).toFixed(3)})`; ctx.lineWidth = lw * 2.6; ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);
+  ctx.strokeStyle = `rgba(224,231,255,${(.55 + .2 * pulse).toFixed(3)})`; ctx.lineWidth = lw * .8; ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);
+  ctx.setLineDash([R(10), R(26)]); ctx.lineDashOffset = -animT * R(22); ctx.strokeStyle = 'rgba(103,232,249,.55)'; ctx.lineWidth = lw * 1.6; ctx.strokeRect(x0, y0, x1 - x0, y1 - y0); ctx.setLineDash([]); ctx.lineDashOffset = 0;
+  // proximity: the barrier lights up where the ship approaches it (also shown at the screen edge when the barrier itself is just off-screen)
+  if (ship && state === 'fly') { const dl = ship.x + OOB, dr = L.W + OOB - ship.x, du = ship.y + OOB, dd = L.H + OOB - ship.y, m = Math.min(dl, dr, du, dd);
+    if (m < 46) { const k = 1 - Math.max(0, m) / 46; let ex = X(ship.x), ey = Y(ship.y), vert = true;
+      if (m === dl) ex = x0; else if (m === dr) ex = x1; else { vert = false; ey = m === du ? y0 : y1; }
+      ex = Math.max(2, Math.min(W - 2, ex)); ey = Math.max(2, Math.min(H - 2, ey));
+      glow(ex, ey, R(34 + 30 * k), 'rgba(129,140,248,A)', .55 * k); const sl = R(40 + 40 * k); ctx.strokeStyle = `rgba(224,231,255,${(.9 * k).toFixed(3)})`; ctx.lineWidth = lw * (1.5 + 2 * k);
+      ctx.beginPath(); if (vert) { ctx.moveTo(ex, ey - sl); ctx.lineTo(ex, ey + sl); } else { ctx.moveTo(ex - sl, ey); ctx.lineTo(ex + sl, ey); } ctx.stroke();
+      edgeNearT -= dt; if (edgeNearT <= 0 && k > .55) { edgeNearT = .45; edgeRipples.push({ x: ship.x, y: ship.y, t: 0 }); } } }
+  // ripples (near-pass pings + a big one when the ship crosses the barrier)
+  for (let i = edgeRipples.length - 1; i >= 0; i--) { const e = edgeRipples[i]; e.t += dt; const T0 = e.big ? 1 : .6; if (e.t > T0) { edgeRipples.splice(i, 1); continue; }
+    const f = e.t / T0, cx = Math.max(x0, Math.min(x1, X(e.x))), cy = Math.max(y0, Math.min(y1, Y(e.y))), sx = Math.max(2, Math.min(W - 2, cx)), sy = Math.max(2, Math.min(H - 2, cy));
+    ctx.strokeStyle = `rgba(165,180,252,${((1 - f) * (e.big ? .9 : .5)).toFixed(3)})`; ctx.lineWidth = lw * (e.big ? 3 : 1.6); ctx.beginPath(); ctx.arc(sx, sy, R((e.big ? 70 : 34) * f + 4), 0, 7); ctx.stroke(); }
+  if (edgeRipples.length > 12) edgeRipples.splice(0, edgeRipples.length - 12);
+  ctx.globalCompositeOperation = pc;
+}
+// v3.1.7: the bottom hint card moves up under the HUD while the ship (plus its aim ring/readout) sits behind it, e.g. on short desktop windows
+function avoidHint() { const h = $('hint'); if (!ship || !L || h.style.display === 'none') return; if ((avoidHint.n = (avoidHint.n || 0) + 1) % 6) return;
+  const hh = h.offsetHeight, hw = h.offsetWidth, l = (W - hw) / 2, b0 = H - 24 - hh, sx = X(ship.x), sy = Y(ship.y), rr = Math.max(46, R(64));
+  const hit = sx + rr > l && sx - rr < l + hw && sy + rr > b0 && sy - rr < H - 24;
+  if (hit !== h.classList.contains('up')) { if (hit) { let y = 0; $('hud').querySelectorAll('.col').forEach(c => y = Math.max(y, c.getBoundingClientRect().bottom)); h.style.top = Math.round(y + 10) + 'px'; } h.classList.toggle('up', hit); } }
 function drawFX(dt) {
   ctx.globalCompositeOperation = 'lighter';
-  for (let i = parts.length - 1; i >= 0; i--) { const p = parts[i]; p.l -= dt; if (p.l <= 0) { parts.splice(i, 1); continue; } p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= .97; p.vy *= .97; if (p.puff) { const f = 1 - p.l / p.l0, rr = R(p.r * (1 + f * 5)); const g = ctx.createRadialGradient(X(p.x), Y(p.y), 0, X(p.x), Y(p.y), rr); g.addColorStop(0, `rgba(255,255,255,${.55 * (1 - f)})`); g.addColorStop(1, 'rgba(226,232,240,0)'); ctx.globalAlpha = 1; ctx.fillStyle = g; ctx.beginPath(); ctx.arc(X(p.x), Y(p.y), rr, 0, 7); ctx.fill(); continue; }
+  for (let i = parts.length - 1; i >= 0; i--) { const p = parts[i]; p.l -= dt; if (p.l <= 0) { parts.splice(i, 1); continue; } p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= .97; p.vy *= .97; if (p.puff) { const f = 1 - p.l / p.l0, rr = R(p.r * (1 + f * 5)); ctx.globalAlpha = .55 * (1 - f); ctx.drawImage(puffSprite(), X(p.x) - rr, Y(p.y) - rr, rr * 2, rr * 2); continue; }
     ctx.globalAlpha = Math.min(1, p.l * 2); ctx.fillStyle = p.c; ctx.beginPath(); ctx.arc(X(p.x), Y(p.y), R(p.r), 0, 7); ctx.fill(); }
   ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
   for (let i = pops.length - 1; i >= 0; i--) { const p = pops[i]; p.t += dt; if (p.t > 1) { pops.splice(i, 1); continue; } ctx.globalAlpha = 1 - p.t; ctx.strokeStyle = '#fde047'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(X(p.x), Y(p.y), R(8 + p.t * 46), 0, 7); ctx.stroke(); ctx.fillStyle = '#fde047'; ctx.font = `bold ${R(16)}px sans-serif`; ctx.textAlign = 'center'; ctx.fillText('+250 ★', X(p.x), Y(p.y - 14 - p.t * 36)); ctx.textAlign = 'left'; }
@@ -781,7 +860,7 @@ function holeK() { // close-pass factor for camera zoom, proximity for audio
 }
 let last = performance.now(), acc = 0, frozen = false;
 function frame(now) {
-  const dt = Math.min(0.05, (now - last) / 1000); last = now; animT += dt; if (save.set.ship === 'roadster' && $('settings').classList.contains('on')) drawShipPrev();
+  const dt = Math.min(0.05, (now - last) / 1000); last = now; animT += dt; drawShuttle.dt = dt; if (save.set.ship === 'roadster' && $('settings').classList.contains('on')) drawShipPrev();
   if (L && state === 'fly') {
     if (press && !braking && L.stops && ship.fuel > 0 && now - press.t >= HOLD_MS) { braking = true; hud(); }
     let sdt = dt; if (slowT > 0) { slowT -= dt; sdt = dt * 0.35; }
@@ -794,7 +873,7 @@ function frame(now) {
   if (L && (state === 'aim' || state === 'fly')) save.stats.play += dt;
   if (aim && state === 'aim') { aimSmooth(dt); if (scanArmed && aim.ang != null) { const v = aimVec(); if (v.p > 3 && (Math.abs(wrapA(v.a - (aim.pa ?? 99))) > 0.002 || Math.abs(v.p - (aim.pp ?? -1)) > 0.5)) { aim.pa = v.a; aim.pp = v.p; preview = computePreview(v.a, v.p); } } }
   if (L && started && state === 'aim') clock += dt;
-  if (L && started) $('hTime').textContent = clock.toFixed(1);
+  if (L && started) hudSet('hTime', 'text', clock.toFixed(1));
   if (L && ship) { const tgt = clampCam(hintPath && hintPath.head ? hintPath.head[1] : ship.y); camWY += (tgt - camWY) * Math.min(1, dt * 4); parX += (((ship.x - 180) / 180) - parX) * .05; }
   shake *= Math.pow(0.02, dt);
   // camera: smooth follow + slight zoom on close passes
@@ -806,7 +885,7 @@ function frame(now) {
   // auto quality
   if (save.set.q === 'auto') { fpsT += (now - (frame.p || now)) / 1000; fpsN++; if (fpsT >= 2.5) { const fps = fpsN / fpsT; fpsT = 0; fpsN = 0;
     if (fps < 48 && autoQ > 0) { autoQ--; resize(); syncSettings(); } else if (fps > 58.5 && autoQ < 2 && !autoUp && animT > 10) { autoUp = 1; autoQ++; resize(); syncSettings(); } } }
-  frame.p = now;
+  frame.p = now; avoidHint();
   if (useGL && !GFX.ok) { useGL = false; resize(); }
   const sx = shake > .3 ? (Math.random() - .5) * shake : 0, sy = shake > .3 ? (Math.random() - .5) * shake : 0;
   lenses = [];
@@ -822,6 +901,7 @@ function frame(now) {
   ctx.save(); ctx.translate(sx, sy);
   if (inLevel) {
     const t = ship.t;
+    drawBorder();
     L.flares.forEach(f => drawFlare(f, t)); L.magnets.forEach(m => drawMagnet(m, animT));
     L.planets.forEach(drawPlanet); L.asteroids.forEach(drawAsteroid); L.gates.forEach(g => drawGate(g, animT)); L.worms.forEach((w, i) => drawWorm(w, animT, i));
     L.moons.forEach((m, mi) => drawMoon(m, t, mi)); L.holes.forEach(h => drawHoleTop(h, t));
@@ -941,5 +1021,5 @@ AU.configure(save.set); applyLang(); toMenu();
 window.BH = { LEVELS, startLevel, launch: (a, p) => launch(a, p), get state() { return state; }, get ship() { return ship; }, get clock() { return clock; }, toMenu, save, persist,
   advance(n, brake, tg) { braking = !!brake && ship.fuel > 0; for (let i = 0; i < n && state === 'fly'; i++) { if (tg != null && i === tg) ship.flip = -ship.flip; tick(); } braking = false; },
   runPlanStep(st) { launch(st.a, st.p); for (let i = 0; i < 2600 && state === 'fly'; i++) { if (st.tg != null && i === st.tg) ship.flip = -ship.flip; braking = st.b != null && i >= st.b && ship.fuel > 0; tick(); } braking = false; },
-  show, buildSectors, syncSettings, buildAch, buildStats, achCheck, get gl() { return useGL; }, get quality() { return qLevel; }, get zoom() { return Z; }, CAT, levelId: LID, unlockAll() { LEVELS.forEach((_, i) => save.open[LID(i)] = 1); persist(); }, get braking() { return braking; }, get pressing() { return !!press; }, toScreen(x, y) { return [X(x), Y(y)]; }, stepN(n) { for (let i = 0; i < n && state === 'fly'; i++) tick(); }, freeze(b) { frozen = !!b; }, forceWin() { if (state === 'aim' || state === 'fly') { clock = clock || 2.5; win(); } }, buildCodex, get facts() { return save.facts; }, get trapT() { return trapT; }, get trapHint() { return trapHint; }, get failTok() { return failTok; }, get hintPath() { return hintPath; }, get skin() { return L && L.skin; }, setBraking: v => { braking = !!v; }, get parts() { return parts; }, toggleMus, drawShipPrev, useHintPath, solverPath, get aimV() { return aim && aim.ang != null ? aimVec() : null; }, get aimDir() { return save.set.aim; }, setShip(x, y, vx, vy) { ship.x = x; ship.y = y; ship.vx = vx; ship.vy = vy; } };
+  show, buildSectors, syncSettings, buildAch, buildStats, achCheck, get gl() { return useGL; }, get quality() { return qLevel; }, get zoom() { return Z; }, CAT, levelId: LID, unlockAll() { LEVELS.forEach((_, i) => save.open[LID(i)] = 1); persist(); }, get braking() { return braking; }, get pressing() { return !!press; }, toScreen(x, y) { return [X(x), Y(y)]; }, stepN(n) { for (let i = 0; i < n && state === 'fly'; i++) tick(); }, freeze(b) { frozen = !!b; }, forceWin() { if (state === 'aim' || state === 'fly') { clock = clock || 2.5; win(); } }, buildCodex, get facts() { return save.facts; }, get trapT() { return trapT; }, get trapHint() { return trapHint; }, get failTok() { return failTok; }, get hintPath() { return hintPath; }, get skin() { return L && L.skin; }, setBraking: v => { braking = !!v; }, get parts() { return parts; }, toggleMus, drawShipPrev, useHintPath, solverPath, get edgeRect() { return L ? edgeRect() : null; }, get dpr() { return DPR; }, get qs() { return QS; }, get shipVis() { return shipVis; }, get noseOffset() { return noseOffset(); }, readoutPos, get canvasPx() { return [cv.width, cv.height, W, H]; }, get aimV() { return aim && aim.ang != null ? aimVec() : null; }, get aimDir() { return save.set.aim; }, setShip(x, y, vx, vy) { ship.x = x; ship.y = y; ship.vx = vx; ship.vy = vy; } };
 })();

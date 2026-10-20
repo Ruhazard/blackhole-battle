@@ -53,6 +53,7 @@ h2{text-shadow:0 0 16px #a855f7;margin-bottom:10px}
 .hb{pointer-events:auto;margin-top:3px}
 #hint{position:absolute;left:50%;bottom:24px;transform:translateX(-50%);width:min(350px,94%);text-align:center;background:linear-gradient(150deg,rgba(255,255,255,.1),rgba(15,8,35,.82));border:1px solid rgba(255,255,255,.16);border-radius:16px;padding:10px 14px;font-size:14px;line-height:1.4;display:none;box-shadow:0 0 24px rgba(124,58,237,.35)}
 #hint b{color:#fde047}
+#hint.up{bottom:auto}#hint:not(.up){top:auto!important}
 #pu{position:absolute;right:6px;top:50%;transform:translateY(-50%);display:none;flex-direction:column;gap:6px;pointer-events:auto;align-items:center;background:rgba(8,6,22,.75);border:1px solid rgba(253,224,71,.4);border-radius:16px;padding:6px 5px;font-size:11px}
 #pu button{pointer-events:auto;border:1px solid rgba(253,224,71,.5);background:rgba(30,16,60,.9);color:#fff;border-radius:12px;padding:6px 9px;font-size:13px}
 #pu button.act{background:linear-gradient(135deg,#ca8a04,#f59e0b);border-color:#fde047}
@@ -165,7 +166,7 @@ input[type=range]::-moz-range-thumb{width:20px;height:20px;border-radius:50%;bac
   <div class="row2" style="width:min(320px,94%)"><button class="btn g" id="bAch" data-i="menu.ach">🏆 Досягнення</button><button class="btn g" id="bStats" data-i="menu.stats">📊 Статистика</button></div>
   <div class="row2" style="width:min(320px,94%)"><button class="btn g" id="bCodex" data-i="menu.codex">📖 Кодекс</button><button class="btn g" id="bSettings" data-i="menu.settings">⚙ Налаштування</button></div>
   <div id="rank"></div><div class="small" id="score" style="margin-top:4px"></div>
-  <div class="small" id="totalStars" style="margin-top:6px"></div><div class="small" id="puInfo" style="margin-top:4px"></div><div class="ver">v3.1.6</div></div>
+  <div class="small" id="totalStars" style="margin-top:6px"></div><div class="small" id="puInfo" style="margin-top:4px"></div><div class="ver">v3.1.7</div></div>
  <div id="achs" class="scr dim"><h2><span data-i="ach.title">Досягнення</span> <span class="small" id="achCount"></span></h2><div class="list" id="achList"></div><button class="btn g s" id="bAchBack" data-i="back">← Назад</button></div>
  <div id="codex" class="scr dim"><h2><span data-i="codex.title">Кодекс</span> <span class="small" id="cxCount"></span></h2><div class="list" id="cxList"></div><button class="btn g s" id="bCxBack" data-i="back">← Назад</button></div>
  <div id="factCard" class="scr dim"><div class="panel fact" id="fcPanel"><div class="flab" id="fcLab"></div><h2 id="fcTitle"></h2><p id="fcText"></p><div class="fstar" id="fcStar"></div><div class="fsrc" id="fcSrc"></div><div class="small ftap" data-i="fact.tap">Торкнись, щоб продовжити</div></div></div>
