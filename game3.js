@@ -1,4 +1,4 @@
-/* Blackhole Battle v3.1.5 — stage 2: visuals, sound, progress (gameplay/physics unchanged from v3.0) */
+/* Blackhole Battle v3.1.6 — stage 2: visuals, sound, progress (gameplay/physics unchanged from v3.0) */
 (() => {
 'use strict';
 const S = window.BHSim;
@@ -23,7 +23,7 @@ function rng(seed) { let s = seed >>> 0 || 1; return () => (s = (s * 1664525 + 1
 const KEY = 'bh_v3';
 let save; try { save = JSON.parse(localStorage.getItem(KEY)) || null; } catch (e) { save = null; }
 save = Object.assign({ unlocked: 1, best: {}, tut: {}, pu: { extra: 0, scan: 0, shield: 0, slow: 0 }, streak: 0, ach: {}, set: {} }, save || {});
-save.set = Object.assign({ vib: true, snd: true, sfx: 80, mus: 60, musOn: true, ship: 'shuttle', q: 'auto', facts: 'win' }, save.set || {}); PR.ensure(save);
+save.set = Object.assign({ vib: true, snd: true, sfx: 80, mus: 60, musOn: true, ship: 'shuttle', aim: 'sling', q: 'auto', facts: 'win' }, save.set || {}); PR.ensure(save);
 save.facts = save.facts || {}; save.lfail = save.lfail || {}; save.hintOk = save.hintOk || {}; /* per-level failures + earned 'ideal path' hints */ I18N.set(save.set.lang); const FACTS = window.BH_FACTS || {}; const lvName = i => I18N.lvName(LID(i), LEVELS[i].n);
 const isOpen = i => CAT.levelOpen(save, i), bestOf = i => save.best[LID(i)];
 const persist = () => { try { localStorage.setItem(KEY, JSON.stringify(save)); } catch (e) {} };
@@ -152,8 +152,8 @@ function startLevel(i, keepGhost) {
   $('hLevel').textContent = `${i + 1}. ${lvName(i)}`; $('hTarget').textContent = L.t3 ? `3★ ≤ ${L.t3}${T('hud.sec')}` : '';
   $('chipFuel').style.display = L.stops ? '' : 'none'; syncHintBtn();
   hud(); buildPU(); requestAnimationFrame(placeAch);
-  const h = $('hint'); h.innerHTML = '💡 ' + I18N.lvHint(LID(i), L.hint); h.style.display = 'block';
-  $('hand').style.display = (i === 0 && !save.tut.aim) ? 'block' : 'none';
+  const h = $('hint'); h.innerHTML = '💡 ' + (i === 0 && save.set.aim === 'direct' ? T('tut.direct') : I18N.lvHint(LID(i), L.hint)); h.style.display = 'block';
+  $('hand').classList.toggle('dir', save.set.aim === 'direct'); $('hand').style.display = (i === 0 && !save.tut.aim) ? 'block' : 'none';
 }
 function clampCam(y) { return L.H <= 640 ? 0 : Math.max(0, Math.min(L.H - 640, y - 380)); }
 function hud() {
@@ -185,12 +185,14 @@ function show(id) { document.querySelectorAll('.scr').forEach(e => e.classList.r
 // ---------- input ----------
 function wpos(e) { return { x: camCX + ((e.clientX - OX) / SC - 180) / Z, y: camCY + ((e.clientY - OY) / SC - 320) / Z }; }
 const wrapA = a => Math.atan2(Math.sin(a), Math.cos(a));
+// Aim direction (v3.1.6): 'sling' = launch opposite to the drag (default), 'direct' = launch along the drag. Power is drag length in both.
+const aimSign = () => save.set.aim === 'direct' ? -1 : 1;
 const AIM_DEAD = 12, AIM_SLOW = 70, AIM_FINE = 0.35;
 // Angle model: the angle follows the drag direction only beyond a dead zone; slow finger motion = fine adjust (35% gain);
 // fast motion re-syncs toward the finger direction; the displayed/launched angle is low-pass filtered (~70 ms). Power = drag length only.
 function aimMove(p, now) {
   const dt = Math.max(1, now - (aim.lt || now - 16)) / 1000, sp = Math.hypot(p.x - aim.x, p.y - aim.y) / dt; aim.x = p.x; aim.y = p.y; aim.lt = now;
-  const dx = aim.sx - aim.x, dy = aim.sy - aim.y, d = Math.hypot(dx, dy); if (d < AIM_DEAD) return;
+  const k = aimSign(), dx = k * (aim.sx - aim.x), dy = k * (aim.sy - aim.y), d = Math.hypot(dx, dy); if (d < AIM_DEAD) return;
   const raw = Math.atan2(dy, dx);
   if (aim.tgt == null) { aim.tgt = raw; aim.ang = raw; aim.raw = raw; return; }
   const dRaw = wrapA(raw - aim.raw); aim.raw = raw;
@@ -199,7 +201,7 @@ function aimMove(p, now) {
   if (!fine) aim.tgt = wrapA(aim.tgt + wrapA(raw - aim.tgt) * 0.25);
 }
 function aimSmooth(dt) { if (!aim || aim.tgt == null) return; const e = wrapA(aim.tgt - aim.ang); aim.ang = Math.abs(e) < 0.002 ? aim.tgt : wrapA(aim.ang + e * Math.min(1, dt * 14)); }
-function aimVec() { const dx = aim.sx - aim.x, dy = aim.sy - aim.y, d = Math.hypot(dx, dy); const pull = Math.min(d, S.MAX_PULL);
+function aimVec() { const k = aimSign(), dx = k * (aim.sx - aim.x), dy = k * (aim.sy - aim.y), d = Math.hypot(dx, dy); const pull = Math.min(d, S.MAX_PULL);
   if (aim.ang != null) return { a: aim.ang, p: pull, pct: Math.round(pull / S.MAX_PULL * 100) };
   return { a: Math.atan2(dy, dx), p: pull, pct: Math.round(pull / S.MAX_PULL * 100) }; }
 function launch(a, p) {
@@ -227,7 +229,8 @@ cv.addEventListener('pointerdown', e => {
   }
   if (state !== 'aim' || aim) return;
   aimId = e.pointerId; try { cv.setPointerCapture(e.pointerId); } catch (_) {}
-  const z = SC * Z, p = { x: e.clientX / z, y: e.clientY / z }; aim = { z, sx: p.x, sy: p.y, x: p.x, y: p.y, lastPct: 0 }; // screen-space drag (immune to camera easing) $('hand').style.display = 'none'; AU.aimStart();
+  const z = SC * Z, p = { x: e.clientX / z, y: e.clientY / z }; aim = { z, sx: p.x, sy: p.y, x: p.x, y: p.y, lastPct: 0 }; // screen-space drag (immune to camera easing)
+  $('hand').style.display = 'none'; AU.aimStart();
 });
 cv.addEventListener('pointermove', e => {
   if (state !== 'aim' || !aim || e.pointerId !== aimId) return; aimMove({ x: e.clientX / aim.z, y: e.clientY / aim.z }, performance.now());
@@ -875,7 +878,8 @@ function toMenu() { resetInput(); ensureBG(5); state = 'menu'; AU.theme('menu');
   $('puInfo').textContent = T('menu.pu', { list: `🚀${save.pu.extra} 📡${save.pu.scan} 🛡${save.pu.shield} ⏳${save.pu.slow}`, n: save.streak % 4 }); show('menu'); }
 function syncSettings() { $('tVib').classList.toggle('on', save.set.vib); $('tSnd').classList.toggle('on', save.set.snd); $('rSfx').value = save.set.sfx; $('rMus').value = save.set.mus; syncMus(); document.querySelectorAll('#shipSeg button').forEach(b => b.classList.toggle('on', b.dataset.s === save.set.ship)); drawShipPrev();
   document.querySelectorAll('#qSeg button').forEach(b => b.classList.toggle('on', b.dataset.q === save.set.q));
-  document.querySelectorAll('#factSeg button').forEach(b => b.classList.toggle('on', b.dataset.f === save.set.facts)); applyLang();
+  document.querySelectorAll('#factSeg button').forEach(b => b.classList.toggle('on', b.dataset.f === save.set.facts));
+  document.querySelectorAll('#aimSeg button').forEach(b => b.classList.toggle('on', b.dataset.a === (save.set.aim === 'direct' ? 'direct' : 'sling'))); applyLang();
   $('qInfo').textContent = T('q.now', { q: QN[qLevel], r: T(useGL ? 'q.gl' : 'q.cv') }); AU.configure(save.set); }
 // ---------- achievements / stats ----------
 let achQ = [], achBusy = false;
@@ -909,6 +913,7 @@ function buildCodex() { const ids = CAT.idOf.filter(id => FACTS[id]), got = ids.
 $('bCodex').onclick = () => { buildCodex(); show('codex'); }; $('bCxBack').onclick = toMenu;
 function applyLang() { I18N.apply(); document.querySelectorAll('#langSeg button').forEach(b => b.classList.toggle('on', b.dataset.l === I18N.lang)); }
 document.querySelectorAll('#langSeg button').forEach(b => b.onclick = () => { save.set.lang = I18N.set(b.dataset.l); persist(); applyLang(); syncSettings(); });
+document.querySelectorAll('#aimSeg button').forEach(b => b.onclick = () => { save.set.aim = b.dataset.a; persist(); syncSettings(); HAP.tick(); });
 document.querySelectorAll('#factSeg button').forEach(b => b.onclick = () => { save.set.facts = b.dataset.f; persist(); syncSettings(); });
 $('bAch').onclick = () => { buildAch(); show('achs'); }; $('bStats').onclick = () => { buildStats(); show('stats'); };
 $('bAchBack').onclick = toMenu; $('bStatBack').onclick = toMenu;
@@ -936,5 +941,5 @@ AU.configure(save.set); applyLang(); toMenu();
 window.BH = { LEVELS, startLevel, launch: (a, p) => launch(a, p), get state() { return state; }, get ship() { return ship; }, get clock() { return clock; }, toMenu, save, persist,
   advance(n, brake, tg) { braking = !!brake && ship.fuel > 0; for (let i = 0; i < n && state === 'fly'; i++) { if (tg != null && i === tg) ship.flip = -ship.flip; tick(); } braking = false; },
   runPlanStep(st) { launch(st.a, st.p); for (let i = 0; i < 2600 && state === 'fly'; i++) { if (st.tg != null && i === st.tg) ship.flip = -ship.flip; braking = st.b != null && i >= st.b && ship.fuel > 0; tick(); } braking = false; },
-  show, buildSectors, syncSettings, buildAch, buildStats, achCheck, get gl() { return useGL; }, get quality() { return qLevel; }, get zoom() { return Z; }, CAT, levelId: LID, unlockAll() { LEVELS.forEach((_, i) => save.open[LID(i)] = 1); persist(); }, get braking() { return braking; }, get pressing() { return !!press; }, toScreen(x, y) { return [X(x), Y(y)]; }, stepN(n) { for (let i = 0; i < n && state === 'fly'; i++) tick(); }, freeze(b) { frozen = !!b; }, forceWin() { if (state === 'aim' || state === 'fly') { clock = clock || 2.5; win(); } }, buildCodex, get facts() { return save.facts; }, get trapT() { return trapT; }, get trapHint() { return trapHint; }, get failTok() { return failTok; }, get hintPath() { return hintPath; }, get skin() { return L && L.skin; }, setBraking: v => { braking = !!v; }, get parts() { return parts; }, toggleMus, drawShipPrev, useHintPath, solverPath, setShip(x, y, vx, vy) { ship.x = x; ship.y = y; ship.vx = vx; ship.vy = vy; } };
+  show, buildSectors, syncSettings, buildAch, buildStats, achCheck, get gl() { return useGL; }, get quality() { return qLevel; }, get zoom() { return Z; }, CAT, levelId: LID, unlockAll() { LEVELS.forEach((_, i) => save.open[LID(i)] = 1); persist(); }, get braking() { return braking; }, get pressing() { return !!press; }, toScreen(x, y) { return [X(x), Y(y)]; }, stepN(n) { for (let i = 0; i < n && state === 'fly'; i++) tick(); }, freeze(b) { frozen = !!b; }, forceWin() { if (state === 'aim' || state === 'fly') { clock = clock || 2.5; win(); } }, buildCodex, get facts() { return save.facts; }, get trapT() { return trapT; }, get trapHint() { return trapHint; }, get failTok() { return failTok; }, get hintPath() { return hintPath; }, get skin() { return L && L.skin; }, setBraking: v => { braking = !!v; }, get parts() { return parts; }, toggleMus, drawShipPrev, useHintPath, solverPath, get aimV() { return aim && aim.ang != null ? aimVec() : null; }, get aimDir() { return save.set.aim; }, setShip(x, y, vx, vy) { ship.x = x; ship.y = y; ship.vx = vx; ship.vy = vy; } };
 })();
