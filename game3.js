@@ -1,4 +1,4 @@
-/* Blackhole Battle v3.1.9 — stage 2: visuals, sound, progress (gameplay/physics unchanged from v3.0) */
+/* Blackhole Battle v3.2.0 — stage 2: visuals, sound, progress (gameplay/physics unchanged from v3.0) */
 (() => {
 'use strict';
 const S = window.BHSim;
@@ -15,6 +15,7 @@ const NOOP = () => {}; const AU = window.BHAudio || { unlock: NOOP, configure: N
 const PR = window.BHProg;
 let W, H, DPR, SC, OX, OY, camWY = 0, Z = 1, camCX = 180, camCY = 320, QS = 1, BGS = 1, qLevel = 1, autoQ = 1, autoUp = 0, fpsT = 0, fpsN = 0;
 const X = x => OX + (180 + (x - camCX) * Z) * SC, Y = y => OY + (320 + (y - camCY) * Z) * SC, R = v => v * SC * Z;
+const SHIPS = window.BHShips; let shipFX = { bank: 0, pa: null, sqT: 9, wheel: 0, death: null, win: null }; // v3.2.0 visual-only ship state
 const glowCache = new Map(); let lenses = [], planetCache = {}, fl = { bounces: 0, margin: 1e9 }, cpK = 0, proxK = 0;
 const QN = { get 0() { return T('q.0'); }, get 1() { return T('q.1'); }, get 2() { return T('q.2'); } };
 function rng(seed) { let s = seed >>> 0 || 1; return () => (s = (s * 1664525 + 1013904223) >>> 0) / 4294967296; }
@@ -151,6 +152,7 @@ function startLevel(i, keepGhost) {
   if (!keepGhost || ghostLevel !== i) { ghost = null; }
   hintPath = null; li = i; ensureBG(SECTORS[CAT.secOf[i]].pal); AU.theme(secTheme(CAT.secOf[i])); L = S.prep(LEVELS[i]); L.skin = resolveSkins(LID(i), L); ship = S.newShip(L); ship.ang = -Math.PI / 2;
   launchesLeft = L.L; collected = new Set(); clock = 0; started = false; resetInput();
+  shipFX.death = null; shipFX.win = null; shipFX.sqT = 9; shipFX.bank = 0; shipFX.pa = null; smokeSprite(); // prewarm (no canvas creation on the first launch)
   trail = []; attempt = []; parts = []; pops = []; edgeRipples = []; aim = null; preview = []; tf = 1; active = {}; scanArmed = false; shieldOn = false; slowT = 0;
   planetCache = {}; camWY = clampCam(ship.y); Z = 1; camCX = 180; camCY = camWY + 320; fl = { bounces: 0, margin: 1e9 }; AU.aimEnd(); state = 'aim'; show(null); $('hud').style.display = 'flex'; hudSet('hTime', 'text', '0.0');
   $('hLevel').textContent = `${i + 1}. ${lvName(i)}`; $('hTarget').textContent = L.t3 ? `3★ ≤ ${L.t3}${T('hud.sec')}` : '';
@@ -212,9 +214,12 @@ function aimVec() { const k = aimSign(), dx = k * (aim.sx - aim.x), dy = k * (ai
 function launch(a, p) {
   const sp = S.launchSpeed(p); ship.vx = Math.cos(a) * sp; ship.vy = Math.sin(a) * sp;
   resetInput(); launchT = performance.now(); flySteps = 0; hintPath = null; $('bHintPath').style.display = 'none'; trap = S.trapNew(ship, L); trapT = 0; setTrapHint(false);
-  launchesLeft--; started = true; state = 'fly'; aim = null; thrust = 0.35; ship.scan = scanArmed; preview = []; scanArmed = false;
+  launchesLeft--; started = true; state = 'fly'; aim = null; thrust = 0.35; shipFX.sqT = 0; ship.scan = scanArmed; preview = []; scanArmed = false;
   if (active.slow && !active.slowUsed) { slowT = 3; active.slowUsed = 1; }
-  for (let i = 0; i < 18; i++) (save.set.ship === 'roadster' ? puff(ship.x - Math.cos(a) * 11, ship.y - Math.sin(a) * 11, -Math.cos(a + (Math.random() - .5) * .9) * (50 + Math.random() * 80), -Math.sin(a + (Math.random() - .5) * .9) * (50 + Math.random() * 80)) : spark(ship.x, ship.y, '#22d3ee', 60 + Math.random() * 90, a + Math.PI + (Math.random() - .5) * 1.2));
+  { const tx = ship.x - Math.cos(a) * 12.4, ty = ship.y - Math.sin(a) * 12.4, rd = save.set.ship === 'roadster'; // v3.2.0 launch burst: cold-gas cloud + ice (roadster) / ignition smoke + hot sparks (shuttle)
+    for (let i = 0; i < 18; i++) { const j = a + Math.PI + (Math.random() - .5) * (rd ? .9 : 1.3), v = 50 + Math.random() * 90;
+      if (rd) { puff(tx, ty, Math.cos(j) * v, Math.sin(j) * v); if (i % 2) ice(tx, ty, Math.cos(j) * v * 1.4, Math.sin(j) * v * 1.4); }
+      else { smoke(tx, ty, Math.cos(j) * v * .8, Math.sin(j) * v * .8, 2 + Math.random() * 2); if (i % 2) spark(tx, ty, i % 4 === 1 ? 'rgba(254,215,170,.95)' : 'rgba(186,230,253,.95)', 60 + Math.random() * 120, j); } } }
   $('hint').style.display = 'none'; $('hand').style.display = 'none'; $('pu').style.display = 'none'; placeAch();
   if (li === 0) { save.tut.aim = 1; persist(); }
   HAP.launch(); AU.launch(p / S.MAX_PULL * 100); save.stats.launches++; hud();
@@ -362,6 +367,7 @@ function deflect(st) {
 }
 function starsFor(t) { return !L.t3 ? 3 : t <= L.t3 ? 3 : t <= L.t2 ? 2 : 1; }
 function win() {
+  shipFX.win = { t: 0, x: ship.x, y: ship.y, ang: ship.ang || 0 };
   resetInput(); state = 'result'; burst(L.portal[0], L.portal[1], '#22d3ee', 50); $('hud').style.display = 'none'; $('hint').style.display = 'none'; ghost = null;
   const t = clock, st = starsFor(t), timePts = Math.max(0, Math.round(((L.t2 || 20) - t) * 100)), bon = collected.size * 250, unused = launchesLeft * 300;
   const score = st * 1000 + timePts + bon + unused;
@@ -406,7 +412,9 @@ function arStart(tok) { const c = $('arC'); c.style.transition = 'none'; c.style
 function arRestart() { if (state !== 'fail') return; failTok++; $('arWrap').classList.remove('on'); startLevel(li, true); }
 function fail(msg, why) {
   if (why === 'oob') edgeRipples.push({ x: ship.x, y: ship.y, t: 0, big: 1 });
-  resetInput(); state = 'fail'; burst(ship.x, ship.y, '#ef4444', 40); shake = 14; HAP.death(); AU.lose();
+  { let hx = null, hy = null, bd = 1e9; if (why === 'swallowed') for (const h of L.holes) { const [qx, qy] = S.holePos(h, ship.t), d = Math.hypot(qx - ship.x, qy - ship.y); if (d < bd) { bd = d; hx = qx; hy = qy; } }
+    shipFX.death = { t: 0, x: ship.x, y: ship.y, ang: ship.ang || 0, hx, hy, vx: ship.vx, vy: ship.vy, kind: save.set.ship }; }
+  resetInput(); state = 'fail'; burst(ship.x, ship.y, why === 'swallowed' ? '#a78bfa' : '#ef4444', why === 'swallowed' ? 18 : 40); shake = 14; HAP.death(); AU.lose();
   save.stats.fails++; save.stats.deaths[why || 'other'] = (save.stats.deaths[why || 'other'] || 0) + 1; achCheck({ type: 'fail' }); persist(); $('hud').style.display = 'none'; $('hint').style.display = 'none';
   ghost = attempt.slice(); ghostLevel = li;
   { const id = LID(li); save.lfail[id] = (save.lfail[id] || 0) + 1; let earned = false; if (save.lfail[id] >= HINT_EVERY && !save.hintOk[id] && LEVELS[li].sol) { save.hintOk[id] = 1; earned = true; } persist();
@@ -420,6 +428,7 @@ function fail(msg, why) {
 function glowSprite(col) { let c = glowCache.get(col); if (c) return c; if (glowCache.size > 96) glowCache.clear(); c = document.createElement('canvas'); c.width = c.height = 128; const x = c.getContext('2d'), g = x.createRadialGradient(64, 64, 0, 64, 64, 64);
   g.addColorStop(0, col.replace('A', 1)); g.addColorStop(1, col.replace('A', 0)); x.fillStyle = g; x.fillRect(0, 0, 128, 128); glowCache.set(col, c); return c; }
 function glow(x, y, r, col, a) { if (!(r > 0) || !(a > 0)) return; const ga = ctx.globalAlpha; ctx.globalAlpha = ga * Math.min(1, a); ctx.drawImage(glowSprite(col), x - r, y - r, r * 2, r * 2); ctx.globalAlpha = ga; }
+let smokeSpr = null; function smokeSprite() { if (smokeSpr) return smokeSpr; smokeSpr = document.createElement('canvas'); smokeSpr.width = smokeSpr.height = 64; const x = smokeSpr.getContext('2d'), g = x.createRadialGradient(32, 32, 0, 32, 32, 32); g.addColorStop(0, 'rgba(203,213,225,1)'); g.addColorStop(.5, 'rgba(148,163,184,.55)'); g.addColorStop(1, 'rgba(100,116,139,0)'); x.fillStyle = g; x.fillRect(0, 0, 64, 64); return smokeSpr; }
 let puffSpr = null; function puffSprite() { if (puffSpr) return puffSpr; puffSpr = document.createElement('canvas'); puffSpr.width = puffSpr.height = 64; const x = puffSpr.getContext('2d'), g = x.createRadialGradient(32, 32, 0, 32, 32, 32);
   g.addColorStop(0, 'rgba(255,255,255,1)'); g.addColorStop(1, 'rgba(226,232,240,0)'); x.fillStyle = g; x.fillRect(0, 0, 64, 64); return puffSpr; }
 // black hole: scene part (lensed in WebGL) + top part (front of disk, kill ring)
@@ -661,74 +670,67 @@ let shipVis = 1.3; const shipVisT = () => (state === 'aim' ? 1.32 : 1.12);
 function drawShuttle() {
   const x = X(ship.x), y = Y(ship.y); shipVis += (shipVisT() - shipVis) * Math.min(1, (drawShuttle.dt || .016) * 6);
   const ang = state === 'fly' && Math.hypot(ship.vx, ship.vy) > 2 ? Math.atan2(ship.vy, ship.vx) : aim ? aimVec().a : ship.ang; ship.ang = ang;
+  const dt = drawShuttle.dt || .016; shipFX.sqT += dt;
+  // banking from the turn rate (visual only)
+  if (shipFX.pa != null && state === 'fly' && dt > 0) { const rate = wrapA(ang - shipFX.pa) / dt; shipFX.bank += (Math.max(-1, Math.min(1, rate * .32)) - shipFX.bank) * Math.min(1, dt * 5); } else shipFX.bank *= Math.max(0, 1 - dt * 4);
+  shipFX.pa = ang; shipFX.wheel += dt * (state === 'fly' ? Math.hypot(ship.vx, ship.vy) * .012 : .12);
+  if (state === 'result' && shipFX.win) return drawWinFlourish(dt);
   // spaghettification: stretch toward the nearest hole
   let sp = 0, sa = 0; if (L) for (const h of L.holes) { const [hx, hy] = S.holePos(h, ship.t); const d = Math.hypot(hx - ship.x, hy - ship.y); const k = Math.max(0, 1 - (d - h.r * S.KILL) / (h.r * 3.5)); if (k > sp) { sp = k; sa = Math.atan2(hy - ship.y, hx - ship.x); } }
   const st = 1 + sp * sp * 0.95;
   // slow-motion echoes
   if (L && state === 'fly' && (slowT > 0 || tf < 0.75) && trail.length > 16) { for (let e = 4; e >= 1; e--) { const p = trail[Math.max(0, trail.length - 1 - e * 4)]; ctx.globalAlpha = 0.09 * (5 - e); drawHull(X(p.x), Y(p.y), ang, 1, 0, null, true); } ctx.globalAlpha = 1; }
-  drawHull(x, y, ang, st, sa, lightAt(ship.x, ship.y), false);
+  const idle = state === 'aim' ? Math.sin(animT * 1.3) * .025 : 0;
+  drawHull(x, y + (state === 'aim' ? Math.sin(animT * 1.9) * R(.35) : 0), ang + idle, st, sa, lightAt(ship.x, ship.y), false);
 }
+// v3.2.0: win flourish — the ship spirals into the portal, shrinking, with a sparkle ring
+function drawWinFlourish(dt) {
+  const w = shipFX.win; w.t += dt; const e = Math.min(1, w.t / .75), q = e * e * (3 - 2 * e), [px, py] = L.portal, a0 = Math.atan2(w.y - py, w.x - px), d0 = Math.hypot(w.x - px, w.y - py) * (1 - q), aa = a0 + q * 3.2;
+  const x = px + Math.cos(aa) * d0, y = py + Math.sin(aa) * d0;
+  if (e < 1) { ctx.globalAlpha = 1 - e * e; drawHull(X(x), Y(y), w.ang + q * 7, 1, 0, { a: Math.atan2(py - y, px - x), c: '165,243,252', k: 1 }, false, R(1) * shipVis * (1 - q * .88)); ctx.globalAlpha = 1;
+    if (Math.random() < .6) spark(x, y, ['#67e8f9', '#fde047', '#fff'][Math.floor(Math.random() * 3)], 30 + Math.random() * 60); }
+  if (w.t > .55 && w.t < 1.4) { const k = (w.t - .55) / .85; ctx.strokeStyle = `rgba(103,232,249,${1 - k})`; ctx.lineWidth = R(3) * (1 - k); ctx.beginPath(); ctx.arc(X(px), Y(py), R(10 + k * 60), 0, 7); ctx.stroke();
+    for (let i = 0; i < 10; i++) { const a = i / 10 * 6.283 + k * 2, r = R(14 + k * 50); ctx.fillStyle = `rgba(253,224,71,${1 - k})`; ctx.beginPath(); ctx.arc(X(px) + Math.cos(a) * r, Y(py) + Math.sin(a) * r, R(1.6) * (1 - k * .6), 0, 7); ctx.fill(); } }
+}
+// v3.2.0: death animation — pulled into the hole (spiral, spaghettified, purple-shifted) or a tumbling break-up for other failures
+function drawDeath(dt) {
+  const d = shipFX.death; if (!d) return; d.t += dt; if (d.t > 1.1) return; const e = Math.min(1, d.t / (d.hx != null ? .8 : .6));
+  if (d.hx != null) { const q = e * e, a0 = Math.atan2(d.y - d.hy, d.x - d.hx), r0 = Math.hypot(d.x - d.hx, d.y - d.hy), aa = a0 + q * 5, r = r0 * (1 - q);
+    const x = d.hx + Math.cos(aa) * r, y = d.hy + Math.sin(aa) * r; if (e >= 1) return; ctx.globalAlpha = 1 - q;
+    drawHull(X(x), Y(y), aa + 1.57 + q * 2, 1 + q * 3, Math.atan2(d.hy - y, d.hx - x), { a: Math.atan2(d.hy - y, d.hx - x), c: '192,132,252', k: 1 }, false, R(1) * shipVis * (1 - q * .7), d.kind); ctx.globalAlpha = 1;
+    if (Math.random() < .5) spark(x, y, 'rgba(192,132,252,.9)', 20 + Math.random() * 40, Math.atan2(d.hy - y, d.hx - x) + (Math.random() - .5)); }
+  else { if (e >= 1) return; const x = d.x + d.vx * d.t * .25, y = d.y + d.vy * d.t * .25; ctx.globalAlpha = (1 - e) * .9; drawHull(X(x), Y(y), d.ang + e * 9, 1, 0, { a: -2.3, c: '254,202,202', k: 1 }, false, R(1) * shipVis * (1 - e * .45), d.kind); ctx.globalAlpha = 1; }
+}
+function shipDev() { return SC * DPR * 1.14 * 1.32; } // device px per world unit at max zoom: one sprite bucket per viewport (no rebuilds in flight)
 function drawHull(x, y, ang, st, sa, lt, ghostly, kk, kind) {
   ctx.save(); ctx.translate(x, y);
   if (st > 1.01) { ctx.rotate(sa); ctx.scale(st, 1 / Math.sqrt(st)); ctx.rotate(-sa); }
-  ctx.rotate(ang); const k = kk || R(1) * shipVis, rd = (kind || save.set.ship) === 'roadster';
-  if (rd) { if (shieldOn && !ghostly && !kk) { ctx.strokeStyle = `rgba(103,232,249,${.5 + .3 * Math.sin(animT * 6)})`; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(0, 0, 17 * k, 0, 7); ctx.stroke(); } drawRoadster(k, lt, ghostly); ctx.restore(); return; }
-  const fl0 = !kk && state === 'fly' && !braking ? 0.6 + thrust * 2 : state === 'aim' ? 0.25 : 0;
-  if (fl0 > 0 && !ghostly) { const pc = ctx.globalCompositeOperation; ctx.globalCompositeOperation = 'lighter'; const len = (14 + Math.random() * 6) * fl0 * k; const g = ctx.createLinearGradient(-8 * k, 0, -8 * k - len, 0); g.addColorStop(0, 'rgba(255,255,255,.95)'); g.addColorStop(.3, 'rgba(56,189,248,.9)'); g.addColorStop(1, 'rgba(124,58,237,0)'); ctx.fillStyle = g; ctx.beginPath(); ctx.moveTo(-8 * k, -3.5 * k); ctx.quadraticCurveTo(-8 * k - len, 0, -8 * k, 3.5 * k); ctx.fill();
-    glow(-9 * k, 0, 9 * k * fl0, 'rgba(56,189,248,A)', .5); ctx.globalCompositeOperation = pc; }
-  if (braking && !ghostly) { ctx.fillStyle = 'rgba(251,146,60,.85)'; for (const s of [-1, 1]) { ctx.beginPath(); ctx.moveTo(9 * k, s * 3 * k); ctx.lineTo((16 + Math.random() * 6) * k, s * (6 + Math.random() * 3) * k); ctx.lineTo(9 * k, s * 5 * k); ctx.fill(); } }
-  if (shieldOn && !ghostly) { ctx.strokeStyle = `rgba(103,232,249,${.5 + .3 * Math.sin(animT * 6)})`; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(0, 0, 16 * k, 0, 7); ctx.stroke(); }
-  ctx.fillStyle = ghostly ? '#a5b4fc' : '#334155'; ctx.beginPath(); ctx.moveTo(1 * k, 0); ctx.lineTo(-7 * k, 10 * k); ctx.lineTo(-9 * k, 10 * k); ctx.lineTo(-6 * k, 0); ctx.lineTo(-9 * k, -10 * k); ctx.lineTo(-7 * k, -10 * k); ctx.closePath(); ctx.fill();
-  const body = () => { ctx.beginPath(); ctx.moveTo(13 * k, 0); ctx.quadraticCurveTo(8 * k, -5 * k, -8 * k, -4.5 * k); ctx.lineTo(-9 * k, 4.5 * k); ctx.quadraticCurveTo(8 * k, 5 * k, 13 * k, 0); };
-  const g = ctx.createLinearGradient(0, -5 * k, 0, 5 * k); g.addColorStop(0, '#e2e8f0'); g.addColorStop(.6, '#94a3b8'); g.addColorStop(1, '#475569');
-  ctx.fillStyle = ghostly ? '#c7d2fe' : g; body(); ctx.fill();
-  if (lt && !ghostly) { // directional light from nearest light source
-    const la = lt.a - ang, lx = Math.cos(la) * 7 * k, ly = Math.sin(la) * 7 * k; const lg = ctx.createLinearGradient(lx, ly, -lx, -ly);
-    lg.addColorStop(0, `rgba(${lt.c},${.75 * lt.k})`); lg.addColorStop(.45, `rgba(${lt.c},${.12 * lt.k})`); lg.addColorStop(.6, 'rgba(2,6,23,.15)'); lg.addColorStop(1, 'rgba(2,6,23,.7)');
-    ctx.fillStyle = lg; body(); ctx.fill(); ctx.strokeStyle = lg; ctx.lineWidth = .9 * k; body(); ctx.stroke();
-  }
-  ctx.fillStyle = '#7c3aed'; ctx.fillRect(-6 * k, -1 * k, 12 * k, 2 * k); ctx.fillStyle = '#0ea5e9'; ctx.beginPath(); ctx.ellipse(6 * k, 0, 3.2 * k, 2.2 * k, 0, 0, 7); ctx.fill();
-  ctx.fillStyle = 'rgba(255,255,255,.7)'; ctx.beginPath(); ctx.ellipse(6.8 * k, -.8 * k, 1.1 * k, .6 * k, 0, 0, 7); ctx.fill();
+  ctx.rotate(ang); const k = kk || R(1) * shipVis, kd = kind || save.set.ship, rd = kd === 'roadster', live = !ghostly && !kk && (state === 'fly' || state === 'aim');
+  if (shieldOn && !ghostly && !kk) { ctx.strokeStyle = `rgba(103,232,249,${.5 + .3 * Math.sin(animT * 6)})`; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(0, 0, (rd ? 17 : 16) * k, 0, 7); ctx.stroke(); }
+  const fly = state === 'fly', sq = live && shipFX.sqT < .7 ? .2 * Math.exp(-shipFX.sqT * 7) * Math.cos(shipFX.sqT * 22) : 0;
+  SHIPS.draw(ctx, kd, { k, dev: shipDev(), t: animT, refl: ang, ghost: ghostly ? '#a5b4fc' : null,
+    engine: kk && !ghostly ? (fly ? .45 : .1) : live ? (fly && !braking ? .42 + thrust * 1.65 : state === 'aim' ? .1 : 0) : 0, ignite: live && fly ? Math.max(0, thrust - .15) * 4 : 0,
+    braking: live && braking, light: lt ? { a: lt.a - ang, c: lt.c, k: lt.k } : null, hole: live && fly ? proxK : 0, bank: live ? shipFX.bank : 0, squash: sq, jolt: sq * 2,
+    wheel: shipFX.wheel, gas: live && fly ? Math.min(1, thrust * 3) : 0 });
   ctx.restore();
 }
-// Roadster (v3.1.5, visual only — same hitbox/physics as the shuttle): generic red open-top sports car, mannequin driver in a spacesuit,
-// cold-gas thrusters (white puffs, no fire) at the rear/front corners. Top-down, nose along +x.
-function drawRoadster(k, lt, ghostly) {
-  const rr = (x, y, w, h, r) => { ctx.beginPath(); ctx.roundRect ? ctx.roundRect(x, y, w, h, r) : ctx.rect(x, y, w, h); };
-  ctx.fillStyle = ghostly ? '#a5b4fc' : '#0f172a'; for (const [wx, wy] of [[7, -6.4], [7, 4.2], [-7.5, -6.6], [-7.5, 4.4]]) { rr(wx * k - 2.4 * k, wy * k, 4.8 * k, 2.2 * k, k); ctx.fill(); } // tyres
-  if (!ghostly) { ctx.fillStyle = '#94a3b8'; for (const [wx, wy] of [[7, -6.4], [7, 4.2], [-7.5, -6.6], [-7.5, 4.4]]) ctx.fillRect(wx * k - 1 * k, (wy + .7) * k, 2 * k, .8 * k); } // rims
-  const body = () => { ctx.beginPath(); ctx.moveTo(13.5 * k, -2.2 * k); ctx.quadraticCurveTo(14 * k, 0, 13.5 * k, 2.2 * k); ctx.quadraticCurveTo(8 * k, 5.6 * k, 2 * k, 5.4 * k); ctx.lineTo(-8 * k, 5.7 * k);
-    ctx.quadraticCurveTo(-11.5 * k, 5.5 * k, -11.5 * k, 3 * k); ctx.lineTo(-11.5 * k, -3 * k); ctx.quadraticCurveTo(-11.5 * k, -5.5 * k, -8 * k, -5.7 * k); ctx.lineTo(2 * k, -5.4 * k); ctx.quadraticCurveTo(8 * k, -5.6 * k, 13.5 * k, -2.2 * k); ctx.closePath(); };
-  const g = ctx.createLinearGradient(0, -6 * k, 0, 6 * k); g.addColorStop(0, '#fca5a5'); g.addColorStop(.25, '#ef4444'); g.addColorStop(.7, '#b91c1c'); g.addColorStop(1, '#7f1d1d');
-  ctx.fillStyle = ghostly ? '#c7d2fe' : g; body(); ctx.fill(); if (ghostly) { ctx.restore && 0; return; }
-  ctx.strokeStyle = 'rgba(127,29,29,.9)'; ctx.lineWidth = .6 * k; body(); ctx.stroke();
-  ctx.strokeStyle = 'rgba(254,202,202,.55)'; ctx.lineWidth = .5 * k; ctx.beginPath(); ctx.moveTo(12 * k, -1.6 * k); ctx.quadraticCurveTo(8 * k, -3.6 * k, 4 * k, -3.8 * k); ctx.moveTo(12 * k, 1.6 * k); ctx.quadraticCurveTo(8 * k, 3.6 * k, 4 * k, 3.8 * k); ctx.stroke(); // hood creases
-  ctx.fillStyle = '#1f2937'; rr(-7.5 * k, -4.4 * k, 9.5 * k, 8.8 * k, 2 * k); ctx.fill();                                   // open cockpit
-  ctx.fillStyle = 'rgba(125,211,252,.55)'; ctx.beginPath(); ctx.moveTo(3.4 * k, -4.6 * k); ctx.quadraticCurveTo(5 * k, 0, 3.4 * k, 4.6 * k); ctx.lineTo(2.3 * k, 4.4 * k); ctx.quadraticCurveTo(3.8 * k, 0, 2.3 * k, -4.4 * k); ctx.closePath(); ctx.fill(); // windscreen
-  ctx.fillStyle = '#7f1d1d'; rr(-7 * k, -3.9 * k, 3 * k, 3.4 * k, .8 * k); ctx.fill(); rr(-7 * k, .5 * k, 3 * k, 3.4 * k, .8 * k); ctx.fill(); // seats
-  // mannequin driver in a white spacesuit (left seat): shoulders, arm to the wheel, helmet with dark visor facing forward
-  ctx.fillStyle = '#f1f5f9'; ctx.beginPath(); ctx.ellipse(-4.2 * k, -2.2 * k, 1.6 * k, 3 * k, 0, 0, 7); ctx.fill();
-  ctx.strokeStyle = '#e2e8f0'; ctx.lineWidth = 1.1 * k; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(-3.6 * k, -3.6 * k); ctx.lineTo(.4 * k, -2.6 * k); ctx.stroke(); ctx.lineCap = 'butt';
-  ctx.strokeStyle = '#111827'; ctx.lineWidth = .7 * k; ctx.beginPath(); ctx.arc(1 * k, -2.2 * k, 1.1 * k, 0, 7); ctx.stroke();             // steering wheel
-  ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(-3.6 * k, -2.2 * k, 2.1 * k, 0, 7); ctx.fill();
-  ctx.fillStyle = '#0f172a'; ctx.beginPath(); ctx.arc(-3.6 * k, -2.2 * k, 1.5 * k, -1.1, 1.1); ctx.closePath(); ctx.fill();
-  ctx.fillStyle = 'rgba(253,224,71,.8)'; ctx.beginPath(); ctx.arc(-2.6 * k, -2.8 * k, .35 * k, 0, 7); ctx.fill();                   // visor glint
-  ctx.fillStyle = '#fde68a'; for (const s of [-1, 1]) { ctx.beginPath(); ctx.ellipse(12.6 * k, s * 2.6 * k, .9 * k, .6 * k, 0, 0, 7); ctx.fill(); } // headlights
-  ctx.fillStyle = '#f87171'; for (const s of [-1, 1]) ctx.fillRect(-11.6 * k, s * 3.6 * k - .6 * k, .8 * k, 1.2 * k);              // tail lights
-  ctx.fillStyle = '#cbd5e1'; for (const [nx, ny] of [[-11.3, -2.2], [-11.3, 2.2], [13, -4.2], [13, 4.2]]) { ctx.beginPath(); ctx.arc(nx * k, ny * k, .7 * k, 0, 7); ctx.fill(); } // gas nozzles
-  if (lt) { const la = lt.a - ship.ang, lx = Math.cos(la) * 8 * k, ly = Math.sin(la) * 8 * k, lg = ctx.createLinearGradient(lx, ly, -lx, -ly);
-    lg.addColorStop(0, `rgba(${lt.c},${.45 * lt.k})`); lg.addColorStop(.5, 'rgba(0,0,0,0)'); lg.addColorStop(1, 'rgba(2,6,23,.45)'); ctx.fillStyle = lg; body(); ctx.fill(); }
-}
+// v3.2.0: ship models live in ships.js (BHShips): pre-rendered high-res sprites + light per-frame layers
 // cold-gas puff (world coords): soft white cloud that expands and fades
 function puff(x, y, vx, vy) { parts.push({ x, y, vx, vy, l: .55 + Math.random() * .4, l0: .95, c: '#fff', r: 1.6 + Math.random(), puff: 1 }); }
+function smoke(x, y, vx, vy, r) { if (parts.length > 420) parts.splice(0, parts.length - 420); const l = .7 + Math.random() * .6; parts.push({ x, y, vx, vy, l, l0: l, r: r || 1.4 + Math.random(), smoke: 1, c: '' }); }
+function ice(x, y, vx, vy) { if (parts.length > 420) parts.splice(0, parts.length - 420); const l = .5 + Math.random() * .6; parts.push({ x, y, vx, vy, l, l0: l, r: .5 + Math.random() * .7, ice: 1, c: '', ph: Math.random() * 6 }); }
 function roadsterJets() { const a = ship.ang, ca = Math.cos(a), sa = Math.sin(a), W = (lx, ly) => [ship.x + ca * lx - sa * ly, ship.y + sa * lx + ca * ly];
-  if (thrust > 0.02) for (const s of [-2.2, 2.2]) for (let q = 0; q < 2; q++) { const [x, y] = W(-12, s); const j = (Math.random() - .5) * .5; puff(x, y, ship.vx * .3 - Math.cos(a + j) * (70 + Math.random() * 60), ship.vy * .3 - Math.sin(a + j) * (70 + Math.random() * 60)); }
-  if (braking) for (const s of [-4.2, 4.2]) { const [x, y] = W(14, s); const j = (Math.random() - .5) * .6 + s * .04; puff(x, y, ship.vx * .2 + Math.cos(a + j) * (60 + Math.random() * 50), ship.vy * .2 + Math.sin(a + j) * (60 + Math.random() * 50)); } }
+  if (thrust > 0.02) for (const s of [-.45, .45]) for (let q = 0; q < 2; q++) { const [x, y] = W(-12.4, s); const j = (Math.random() - .5) * .45 + s * .25, v = 70 + Math.random() * 70; puff(x, y, ship.vx * .3 - Math.cos(a + j) * v, ship.vy * .3 - Math.sin(a + j) * v); if (Math.random() < .7) ice(x, y, ship.vx * .3 - Math.cos(a + j * 2) * v * 1.2, ship.vy * .3 - Math.sin(a + j * 2) * v * 1.2); }
+  if (braking) for (const s of [-3.05, 3.05]) { const [x, y] = W(13.8, s); const j = (Math.random() - .5) * .6 + s * .05, v = 60 + Math.random() * 50; puff(x, y, ship.vx * .2 + Math.cos(a + j) * v, ship.vy * .2 + Math.sin(a + j) * v); if (Math.random() < .5) ice(x, y, ship.vx * .2 + Math.cos(a + j) * v * 1.3, ship.vy * .2 + Math.sin(a + j) * v * 1.3); } }
+// shuttle: exhaust smoke + hot sparks from the bells; nose RCS puffs while braking
+function shuttleJets() { const a = ship.ang, ca = Math.cos(a), sa = Math.sin(a), W = (lx, ly) => [ship.x + ca * lx - sa * ly, ship.y + sa * lx + ca * ly], spd = Math.hypot(ship.vx, ship.vy);
+  if (!braking) { const [x, y] = W(-13, (Math.random() - .5) * 2.4), n = (qLevel === 0 ? .3 : qLevel === 1 ? .7 : 1.1) * (.5 + thrust * 6); // smoke is fill-rate heavy: scale with quality
+    for (let q = 0; q < n; q++) if (Math.random() < .8) { const j = (Math.random() - .5) * .35, v = 30 + Math.random() * 40 + thrust * 160; smoke(x, y, ship.vx * .25 - Math.cos(a + j) * v, ship.vy * .25 - Math.sin(a + j) * v, 1.1 + thrust * 3); }
+    if (Math.random() < .5 + thrust * 2) spark(x, y, ['rgba(186,230,253,.9)', 'rgba(167,139,250,.8)', 'rgba(255,255,255,.85)'][Math.floor(Math.random() * 3)], 30 + Math.random() * 40 + spd * .2, a + Math.PI + (Math.random() - .5) * .4); }
+  else for (const s of [-1.75, 1.75]) if (Math.random() < .6) { const [x, y] = W(12, s), j = (Math.random() - .5) * .5 + Math.sign(s) * .35, v = 50 + Math.random() * 40; puff(x, y, ship.vx * .2 + Math.cos(a + j) * v, ship.vy * .2 + Math.sin(a + j) * v); } }
 let pcv = null;
-function drawShipPrev() { const c = $('shipPrev'); if (!c) return; const d = Math.min(3, window.devicePixelRatio || 1); if (c.width !== 132 * d) { c.width = 132 * d; c.height = 56 * d; } const old = ctx; ctx = c.getContext('2d'); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, c.width, c.height);
-  const rd = save.set.ship === 'roadster', k = 2.6 * d, x = 70 * d, y = 28 * d;
-  if (rd) for (let i = 0; i < 9; i++) { const ph = (animT * 1.4 + i / 9) % 1; for (const s of [-2.2, 2.2]) { const r = (1.5 + ph * 7) * k * .6; ctx.fillStyle = `rgba(255,255,255,${.5 * (1 - ph)})`; ctx.beginPath(); ctx.arc(x - (12 + ph * 16) * k, y + (s + s * ph * .8) * k, r, 0, 7); ctx.fill(); } }
-  drawHull(x, y, 0, 1, 0, null, false, k, save.set.ship); ctx = old; }
+function drawShipPrev() { const c = $('shipPrev'); if (!c) return; const d = Math.min(3, window.devicePixelRatio || 1), cw = c.clientWidth || 300, ch = c.clientHeight || 150, pw = Math.round(cw * d), ph = Math.round(ch * d);
+  if (c.width !== pw || c.height !== ph) { c.width = pw; c.height = ph; } const x = c.getContext('2d'); x.setTransform(1, 0, 0, 1, 0, 0); x.clearRect(0, 0, pw, ph); SHIPS.preview(x, save.set.ship, pw, ph, animT); }
 function drawGhost() {
   if (!ghost || ghost.length < 2) return; ctx.strokeStyle = 'rgba(203,213,225,.22)'; ctx.lineWidth = 1.5; ctx.setLineDash([2, 5]); ctx.beginPath();
   ghost.forEach((p, i) => { if (i === 0 || p[2]) ctx.moveTo(X(p[0]), Y(p[1])); else ctx.lineTo(X(p[0]), Y(p[1])); }); ctx.stroke(); ctx.setLineDash([]);
@@ -836,8 +838,12 @@ function avoidHint() { const h = $('hint'); if (!ship || !L || h.style.display =
   const up = hitB && !over(px, py, pr, t0, t0 + hh) && !over(sx, sy, rr, t0, t0 + hh), fade = hitB && !up;
   if (up) h.style.top = t0 + 'px'; h.classList.toggle('up', up); h.classList.toggle('fade', fade); }
 function drawFX(dt) {
-  ctx.globalCompositeOperation = 'lighter';
-  for (let i = parts.length - 1; i >= 0; i--) { const p = parts[i]; p.l -= dt; if (p.l <= 0) { parts.splice(i, 1); continue; } p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= .97; p.vy *= .97; if (p.puff) { const f = 1 - p.l / p.l0, rr = R(p.r * (1 + f * 5)); ctx.globalAlpha = .55 * (1 - f); ctx.drawImage(puffSprite(), X(p.x) - rr, Y(p.y) - rr, rr * 2, rr * 2); continue; }
+  for (const p of parts) if (p.smoke && p.l > 0) { const f = 1 - p.l / p.l0, rr = R(p.r * (1 + f * 3.2)); ctx.globalAlpha = .22 * (1 - f) * Math.min(1, f * 6 + .2); ctx.drawImage(smokeSprite(), X(p.x) - rr, Y(p.y) - rr, rr * 2, rr * 2); }
+  ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'lighter';
+  for (let i = parts.length - 1; i >= 0; i--) { const p = parts[i]; p.l -= dt; if (p.l <= 0) { parts.splice(i, 1); continue; } p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= .97; p.vy *= .97; if (p.smoke) { p.vx *= .985; p.vy *= .985; continue; }
+    if (p.ice) { const f = 1 - p.l / p.l0, tw = .55 + .45 * Math.sin(animT * 22 + p.ph), r = R(p.r) * (1.4 - f * .6), x = X(p.x), y = Y(p.y); ctx.globalAlpha = (1 - f) * tw; ctx.fillStyle = '#e0f2fe';
+      ctx.beginPath(); ctx.moveTo(x, y - r * 1.6); ctx.lineTo(x + r * .35, y); ctx.lineTo(x, y + r * 1.6); ctx.lineTo(x - r * .35, y); ctx.closePath(); ctx.moveTo(x - r * 1.6, y); ctx.lineTo(x, y + r * .35); ctx.lineTo(x + r * 1.6, y); ctx.lineTo(x, y - r * .35); ctx.closePath(); ctx.fill(); continue; }
+    if (p.puff) { const f = 1 - p.l / p.l0, rr = R(p.r * (1 + f * 5)); ctx.globalAlpha = .55 * (1 - f); ctx.drawImage(puffSprite(), X(p.x) - rr, Y(p.y) - rr, rr * 2, rr * 2); continue; }
     ctx.globalAlpha = Math.min(1, p.l * 2); ctx.fillStyle = p.c; ctx.beginPath(); ctx.arc(X(p.x), Y(p.y), R(p.r), 0, 7); ctx.fill(); }
   ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
   for (let i = pops.length - 1; i >= 0; i--) { const p = pops[i]; p.t += dt; if (p.t > 1) { pops.splice(i, 1); continue; } ctx.globalAlpha = 1 - p.t; ctx.strokeStyle = '#fde047'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(X(p.x), Y(p.y), R(8 + p.t * 46), 0, 7); ctx.stroke(); ctx.fillStyle = '#fde047'; ctx.font = `bold ${R(16)}px sans-serif`; ctx.textAlign = 'center'; ctx.fillText('+250 ★', X(p.x), Y(p.y - 14 - p.t * 36)); ctx.textAlign = 'left'; }
@@ -862,16 +868,18 @@ function holeK() { // close-pass factor for camera zoom, proximity for audio
   for (const h of L.holes) { const [hx, hy] = S.holePos(h, ship.t); const d = Math.hypot(ship.x - hx, ship.y - hy) - h.r * S.KILL; cp = Math.max(cp, 1 - d / (h.r * 5)); px = Math.max(px, 1 - d / (h.r * 9)); }
   return [Math.max(0, Math.min(1, cp)), Math.max(0, Math.min(1, px))];
 }
+// radial speed toward the nearest hole (+ approaching), scaled by proximity: drives the doppler-ish engine pitch
+function shipDop() { if (!L || !ship || !L.holes.length) return 0; let best = null, bd = 1e9; for (const h of L.holes) { const [hx, hy] = S.holePos(h, ship.t), d = Math.hypot(hx - ship.x, hy - ship.y); if (d < bd) { bd = d; best = [hx, hy]; } }
+  const vr = ((best[0] - ship.x) * ship.vx + (best[1] - ship.y) * ship.vy) / Math.max(1, bd); return Math.max(-1, Math.min(1, vr / 400)) * proxK; }
 let last = performance.now(), acc = 0, frozen = false;
 function frame(now) {
-  const dt = Math.min(0.05, (now - last) / 1000); last = now; animT += dt; drawShuttle.dt = dt; if (save.set.ship === 'roadster' && $('settings').classList.contains('on')) drawShipPrev();
+  const dt = Math.min(0.05, (now - last) / 1000); last = now; animT += dt; drawShuttle.dt = dt; if ($('settings').classList.contains('on')) drawShipPrev();
   if (L && state === 'fly') {
     if (press && !braking && L.stops && ship.fuel > 0 && now - press.t >= HOLD_MS) { braking = true; hud(); }
     let sdt = dt; if (slowT > 0) { slowT -= dt; sdt = dt * 0.35; }
     acc += sdt; while (acc >= S.STEP && state === 'fly' && !frozen) { tick(); acc -= S.STEP; }
     thrust = Math.max(0, thrust - dt); heartbeat(dt);
-    if (save.set.ship === 'roadster') roadsterJets(); else if (!braking) { const spd = Math.hypot(ship.vx, ship.vy), n = (qLevel === 0 ? 1 : 2) * (0.4 + spd / 400); const ba = Math.atan2(-ship.vy, -ship.vx);
-      for (let q = 0; q < n; q++) if (Math.random() < 0.75) spark(ship.x - Math.cos(ba) * -6, ship.y - Math.sin(ba) * -6, ['rgba(56,189,248,.85)', 'rgba(167,139,250,.8)', 'rgba(255,255,255,.8)'][Math.floor(Math.random() * 3)], 20 + Math.random() * 40, ba + (Math.random() - .5) * .5); }
+    if (save.set.ship === 'roadster') roadsterJets(); else shuttleJets();
     hud();
   } else acc = 0;
   if (L && (state === 'aim' || state === 'fly')) save.stats.play += dt;
@@ -885,7 +893,7 @@ function frame(now) {
   const tZ = 1 + 0.13 * cp; Z += (tZ - Z) * Math.min(1, dt * (tZ > Z ? 2.2 : 1.5));
   const zf = (Z - 1) / 0.13 * 0.45, baseCY = camWY + 320;
   camCX = L && ship ? 180 + (ship.x - 180) * zf : 180; camCY = L && ship ? baseCY + (ship.y - baseCY) * zf : 320;
-  AU.update({ fly: state === 'fly', braking: braking && state === 'fly', speed: ship && L ? Math.hypot(ship.vx, ship.vy) : 0, prox: state === 'fly' ? proxK : (L ? 0 : 0.35), tf: state === 'fly' ? (slowT > 0 ? 0.5 : tf) : 1, aiming: state === 'aim' && !!aim });
+  AU.update({ pan: ship && L ? Math.max(-1, Math.min(1, (X(ship.x) - W / 2) / (W / 2))) : 0, dop: state === 'fly' ? shipDop() : 0, fly: state === 'fly', braking: braking && state === 'fly', speed: ship && L ? Math.hypot(ship.vx, ship.vy) : 0, prox: state === 'fly' ? proxK : (L ? 0 : 0.35), tf: state === 'fly' ? (slowT > 0 ? 0.5 : tf) : 1, aiming: state === 'aim' && !!aim });
   // auto quality
   if (save.set.q === 'auto') { fpsT += (now - (frame.p || now)) / 1000; fpsN++; if (fpsT >= 2.5) { const fps = fpsN / fpsT; fpsT = 0; fpsN = 0;
     if (fps < 48 && autoQ > 0) { autoQ--; resize(); syncSettings(); } else if (fps > 58.5 && autoQ < 2 && !autoUp && animT > 10) { autoUp = 1; autoQ++; resize(); syncSettings(); } } }
@@ -910,7 +918,7 @@ function frame(now) {
     L.planets.forEach(drawPlanet); L.asteroids.forEach(drawAsteroid); L.gates.forEach(g => drawGate(g, animT)); L.worms.forEach((w, i) => drawWorm(w, animT, i));
     L.moons.forEach((m, mi) => drawMoon(m, t, mi)); L.holes.forEach(h => drawHoleTop(h, t));
     drawPortal(animT); L.keys.forEach((k, i) => drawKey(k, i, animT)); L.stars.forEach((s, k) => drawStar(s, k, animT));
-    drawGhost(); drawHintPath(); drawTrail(); drawAim(); if (state !== 'fail') drawShuttle(); if (state === 'aim' && aim && aim.ang != null) drawBeam(aimVec()); drawFX(dt); if (!useGL) drawSlowmo();
+    drawGhost(); drawHintPath(); drawTrail(); drawAim(); if (state !== 'fail') drawShuttle(); else drawDeath(dt); if (state === 'aim' && aim && aim.ang != null) drawBeam(aimVec()); drawFX(dt); if (!useGL) drawSlowmo();
   } else {
     drawHoleTop(MENU_HOLE, animT);
     if (!ship) ship = { x: 0, y: 0, vx: 0, vy: 0, t: 0, broken: 0, keys: 0, flip: 1 };
@@ -960,7 +968,7 @@ function toMenu() { resetInput(); ensureBG(5); state = 'menu'; AU.theme('menu');
   $('score').textContent = T('menu.score', { s: I18N.num(PR.score(save)), a: Object.keys(save.achv).length, b: PR.ACH.length }); $('hud').style.display = 'none'; $('hint').style.display = 'none'; $('hand').style.display = 'none'; $('pu').style.display = 'none';
   $('totalStars').textContent = T('menu.stars', { s: totalStars(), m: CAT.maxStars, o: LEVELS.filter((_, i) => isOpen(i)).length, n: LEVELS.length });
   $('puInfo').textContent = T('menu.pu', { list: `🚀${save.pu.extra} 📡${save.pu.scan} 🛡${save.pu.shield} ⏳${save.pu.slow}`, n: save.streak % 4 }); show('menu'); }
-function syncSettings() { $('tVib').classList.toggle('on', save.set.vib); $('tSnd').classList.toggle('on', save.set.snd); $('rSfx').value = save.set.sfx; $('rMus').value = save.set.mus; syncMus(); document.querySelectorAll('#shipSeg button').forEach(b => b.classList.toggle('on', b.dataset.s === save.set.ship)); drawShipPrev();
+function syncSettings() { $('tVib').classList.toggle('on', save.set.vib); $('tSnd').classList.toggle('on', save.set.snd); $('rSfx').value = save.set.sfx; $('rMus').value = save.set.mus; syncMus(); document.querySelectorAll('#shipSeg button').forEach(b => b.classList.toggle('on', b.dataset.s === save.set.ship)); if ($('settings').classList.contains('on')) drawShipPrev();
   document.querySelectorAll('#qSeg button').forEach(b => b.classList.toggle('on', b.dataset.q === save.set.q));
   document.querySelectorAll('#factSeg button').forEach(b => b.classList.toggle('on', b.dataset.f === save.set.facts));
   document.querySelectorAll('#aimSeg button').forEach(b => b.classList.toggle('on', b.dataset.a === (save.set.aim === 'direct' ? 'direct' : 'sling'))); applyLang();
@@ -1014,7 +1022,7 @@ $('rMus').oninput = e => { save.set.mus = +e.target.value; if (save.set.mus > 0)
 function syncMus() { const on = save.set.musOn !== false; $('tMus').classList.toggle('on', on); $('bMus').classList.toggle('off', !on); $('bMus').textContent = on ? '🎵' : '🔇'; $('bMus').title = T(on ? 'mus.on' : 'mus.off'); }
 function toggleMus() { save.set.musOn = save.set.musOn === false; persist(); AU.unlock(); AU.configure(save.set); syncMus(); toast(T(save.set.musOn ? 'mus.on' : 'mus.off'), 900); }
 $('tMus').onclick = toggleMus; $('bMus').onclick = e => { e.stopPropagation(); toggleMus(); };
-document.querySelectorAll('#shipSeg button').forEach(b => b.onclick = () => { save.set.ship = b.dataset.s; persist(); syncSettings(); });
+document.querySelectorAll('#shipSeg button').forEach(b => b.onclick = () => { save.set.ship = b.dataset.s; persist(); syncSettings(); AU.unlock(); if (AU.pickShip) AU.pickShip(b.dataset.s); });
 $('bSetBack').onclick = toMenu; $('bBack1').onclick = toMenu; $('bBack2').onclick = () => { buildSectors(); show('sectors'); };
 $('bRestart').onclick = () => { if (started) { ghost = attempt.slice(); ghostLevel = li; } startLevel(li, true); }; $('bMenu').onclick = toMenu; $('bHintPath').onclick = e => { e.stopPropagation(); useHintPath(); };
 $('bNext').onclick = () => startLevel(li + 1); $('bRetry').onclick = () => startLevel(li); $('bRetry2').onclick = e => { e.stopPropagation(); arRestart(); };
@@ -1022,7 +1030,7 @@ $('fail').onclick = e => { if (e.target.closest('#bLv2,#bFailMenu')) return; arR
 $('bFailMenu').onclick = () => { failTok++; toMenu(); };
 $('bLv').onclick = $('bLv2').onclick = () => { failTok++; curSector = CAT.secOf[li]; buildLevels(); show('levels'); AU.theme(secTheme(curSector)); };
 AU.configure(save.set); applyLang(); toMenu();
-window.BH = { LEVELS, startLevel, launch: (a, p) => launch(a, p), get state() { return state; }, get ship() { return ship; }, get clock() { return clock; }, toMenu, save, persist,
+window.BH = { get shipFX() { return shipFX; }, get shipsMade() { return SHIPS.made; }, LEVELS, startLevel, launch: (a, p) => launch(a, p), get state() { return state; }, get ship() { return ship; }, get clock() { return clock; }, toMenu, save, persist,
   advance(n, brake, tg) { braking = !!brake && ship.fuel > 0; for (let i = 0; i < n && state === 'fly'; i++) { if (tg != null && i === tg) ship.flip = -ship.flip; tick(); } braking = false; },
   runPlanStep(st) { launch(st.a, st.p); for (let i = 0; i < 2600 && state === 'fly'; i++) { if (st.tg != null && i === st.tg) ship.flip = -ship.flip; braking = st.b != null && i >= st.b && ship.fuel > 0; tick(); } braking = false; },
   show, buildSectors, syncSettings, buildAch, buildStats, achCheck, get gl() { return useGL; }, get quality() { return qLevel; }, get zoom() { return Z; }, CAT, levelId: LID, unlockAll() { LEVELS.forEach((_, i) => save.open[LID(i)] = 1); persist(); }, get braking() { return braking; }, get pressing() { return !!press; }, toScreen(x, y) { return [X(x), Y(y)]; }, stepN(n) { for (let i = 0; i < n && state === 'fly'; i++) tick(); }, freeze(b) { frozen = !!b; }, forceWin() { if (state === 'aim' || state === 'fly') { clock = clock || 2.5; win(); } }, buildCodex, get facts() { return save.facts; }, get trapT() { return trapT; }, get trapHint() { return trapHint; }, get failTok() { return failTok; }, get hintPath() { return hintPath; }, get skin() { return L && L.skin; }, setBraking: v => { braking = !!v; }, get parts() { return parts; }, toggleMus, drawShipPrev, useHintPath, solverPath, get edgeRect() { return L ? edgeRect() : null; }, get dpr() { return DPR; }, get qs() { return QS; }, get shipVis() { return shipVis; }, get noseOffset() { return noseOffset(); }, readoutPos, get canvasPx() { return [cv.width, cv.height, W, H]; }, get aimV() { return aim && aim.ang != null ? aimVec() : null; }, get aimDir() { return save.set.aim; }, setShip(x, y, vx, vy) { ship.x = x; ship.y = y; ship.vx = vx; ship.vy = vy; } };

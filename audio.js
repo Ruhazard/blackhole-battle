@@ -1,7 +1,7 @@
-/* Blackhole Battle v3.1.9 — procedural WebAudio sound (no samples; everything synthesized at runtime) */
+/* Blackhole Battle v3.2.0 — procedural WebAudio sound (no samples; everything synthesized at runtime) */
 window.BHAudio = (() => {
   'use strict';
-  let ac = null, comp, master, musBus, sfxBus, musPre, musDuck, sfxPre, echoIn, noiseBuf = null;
+  let ac = null, comp, master, musBus, sfxBus, musPre, musDuck, sfxPre, echoIn, noiseBuf = null, shipOut = null, shipPan = null, waveBuf = null;
   let set = { snd: true, sfx: 80, mus: 60, musOn: true, ship: 'shuttle' }; let eng = null, lastSet = { aim: null, launch: null, brake: null, fly: null, win: null };
   const shipKind = () => set.ship === 'roadster' ? 'roadster' : 'shuttle';
   // live-source accounting (debug/e2e): every oscillator / buffer source made by O()/noise() counts until its 'ended' fires
@@ -35,7 +35,7 @@ window.BHAudio = (() => {
     sfxPre = G(1); sfxPre.connect(sfxBus);
     const revS = ac.createConvolver(); revS.buffer = makeIR(1.8, 3); const revSG = G(0.22); sfxPre.connect(revS); revS.connect(revSG); revSG.connect(sfxBus);
     echoIn = G(1); const dl = ac.createDelay(1.5); dl.delayTime.value = 0.21; const fb = G(0.38); const eLp = F('lowpass', 2600); echoIn.connect(dl); dl.connect(eLp); eLp.connect(fb); fb.connect(dl); eLp.connect(sfxBus); echoIn.connect(sfxPre);
-    M(startMusic)(); startLoops(); apply();
+    shipChain(); M(startMusic)(); startLoops(); apply();
   }
   // ---------- music (v3.1.5): generative, per-sector themes ----------
   // A pure Composer (no WebAudio; testable in node) emits note events chord by chord; the renderer below turns them into synth voices.
@@ -166,9 +166,19 @@ window.BHAudio = (() => {
       [[1, 1], [2.76, .22], [5.4, .07]].forEach(([r, a]) => { const o = O('sine', mtof(m) * r), og = G(a); o.detune.value = detNow; o.connect(og); og.connect(g); o.start(t); o.stop(t + d + .2); }); }
     else if (inst === 'arp') { const g = G(0); g.connect(dest); env(g, t, 0.02, 0.035 * v, .45 + d * .3); osc('sine', m, t, g).stop(t + 1.2); osc('triangle', m + 12, t, g, 4).stop(t + 1.2); }
   }
+  // v3.2.0 ship bus: stereo panning by on-screen x + a generated long, dark reverb tail (convolution with a synthetic impulse)
+  function shipChain() { shipPan = ac.createStereoPanner ? ac.createStereoPanner() : G(1); shipPan.connect(sfxPre); shipOut = G(1); shipOut.connect(shipPan);
+    const cv = ac.createConvolver(); cv.buffer = makeIR(2.8, 2.4); const lp = F('lowpass', 2600, 0.5), tg = G(0.2); shipOut.connect(cv); cv.connect(lp); lp.connect(tg); tg.connect(shipPan); }
+  // engine waveform with proper harmonics (strong 2nd/4th 'firing' orders, falling upper partials) — cached per context
+  function engWave() { if (waveBuf && waveBuf.ctx === ac) return waveBuf.w; const n = 28, re = new Float32Array(n), im = new Float32Array(n);
+    const amp = [0, 1, .78, .5, .62, .3, .34, .18, .26, .12, .14, .08, .12]; for (let i = 1; i < n; i++) im[i] = (amp[i] != null ? amp[i] : .5 / Math.pow(i, 1.25)) * (i % 2 ? 1 : 1.05);
+    const w = ac.createPeriodicWave(re, im); waveBuf = { ctx: ac, w }; return w; }
+  function OW(f) { const o = O('sine', f); o.setPeriodicWave(engWave()); return o; }
+  // short mechanical tick (valve / relay)
+  function tick(tt, f, a, out) { const n = noise(), h = F('bandpass', f, 2.5), g = G(0); n.connect(h); h.connect(g); g.connect(out || shipOut); g.gain.setValueAtTime(0.0001, tt); g.gain.linearRampToValueAtTime(a, tt + 0.002); g.gain.exponentialRampToValueAtTime(0.0001, tt + 0.03); n.start(tt); n.stop(tt + 0.04); }
   // ---------- continuous loops: engine hum, black-hole rumble ----------
   function startLoops() {
-    const hf = F('lowpass', 240, 3), hg = G(0.0001); const h1 = O('sawtooth', 52), h2 = O('square', 52.7), hm = G(0.35); h1.connect(hf); h2.connect(hm); hm.connect(hf); hf.connect(hg); hg.connect(sfxPre); h1.start(); h2.start();
+    const hf = F('lowpass', 240, 3), hg = G(0.0001); const h1 = O('sawtooth', 52), h2 = O('square', 52.7), hm = G(0.35); h1.connect(hf); h2.connect(hm); hm.connect(hf); hf.connect(hg); hg.connect(shipOut); h1.start(); h2.start();
     hum = { f: hf, g: hg, o: [h1, h2] };
     const rn = noise(), rf = F('lowpass', 85, 0.8), rg = G(0.0001), rs = O('sine', 34), rsg = G(0.7), lfo = O('sine', 0.9), lg = G(0.35), am = G(0.65);
     rn.connect(rf); rf.connect(am); rs.connect(rsg); rsg.connect(am); lfo.connect(lg); lg.connect(am.gain); am.connect(rg); rg.connect(sfxPre); rn.start(); rs.start(); lfo.start();
@@ -180,26 +190,27 @@ window.BHAudio = (() => {
     const nz = noise(); nz.start(); const E = { nz };
     // shuttle: rocket hum/whoosh = band-passed noise + low sine; 'boost' is the post-launch roar tail
     const sF = F('bandpass', 420, 0.7), sG = G(0.0001), sB = G(0.0001), sLo = O('sine', 48), sLoG = G(0.5), sLp = F('lowpass', 900, 0.5);
-    nz.connect(sF); sF.connect(sLp); sLo.connect(sLoG); sLoG.connect(sLp); sLp.connect(sG); sLp.connect(sB); sG.connect(sfxPre); sB.connect(sfxPre); sLo.start();
+    nz.connect(sF); sF.connect(sLp); sLo.connect(sLoG); sLoG.connect(sLp); sLp.connect(sG); sLp.connect(sB); sG.connect(shipOut); sB.connect(shipOut); sLo.start();
     E.shuttle = { f: sF, g: sG, boost: sB, lo: sLo, lp: sLp };
     // roadster: light engine idle/purr = two detuned saws + pulse-ish square through a low-pass, amplitude 'chug' LFO follows rpm
-    const r1 = O('sawtooth', 46), r2 = O('square', 46.4), r2g = G(0.35), rLp = F('lowpass', 520, 2.5), rAm = G(0.7), rLfo = O('sine', 11), rLg = G(0.3), rG = G(0.0001), rB = G(0.0001);
-    r1.connect(rLp); r2.connect(r2g); r2g.connect(rLp); rLp.connect(rAm); rLfo.connect(rLg); rLg.connect(rAm.gain); rAm.connect(rG); rAm.connect(rB); rG.connect(sfxPre); rB.connect(sfxPre); r1.start(); r2.start(); rLfo.start();
-    E.roadster = { o: [r1, r2], lp: rLp, lfo: rLfo, g: rG, boost: rB };
+    const r1 = OW(46), r2 = O('sine', 23.1), r2g = G(0.45), rLp = F('lowpass', 520, 2.5), rAm = G(0.7), rLfo = O('sine', 11), rLg = G(0.3), rG = G(0.0001), rB = G(0.0001);
+    r1.connect(rLp); r2.connect(r2g); r2g.connect(rLp); rLp.connect(rAm); rLfo.connect(rLg); rLg.connect(rAm.gain); rAm.connect(rG); rAm.connect(rB); rG.connect(shipOut); rB.connect(shipOut); r1.start(); r2.start(); rLfo.start();
+    const wh = O('sine', 900), whg = G(0.07); wh.connect(whg); whg.connect(rG); wh.start(); // electric-motor whine under the 'engine'
+    E.roadster = { o: [r1, r2], wh, lp: rLp, lfo: rLfo, g: rG, boost: rB };
     // shuttle brake: retro-thruster bursts = noise band-pass gated by a fast square LFO
     const bF = F('bandpass', 850, 0.8), bAm = G(0.5), bL = O('square', 9), bLg = G(0.5), bG = G(0.0001);
-    nz.connect(bF); bF.connect(bAm); bL.connect(bLg); bLg.connect(bAm.gain); bAm.connect(bG); bG.connect(sfxPre); bL.start();
+    nz.connect(bF); bF.connect(bAm); bL.connect(bLg); bLg.connect(bAm.gain); bAm.connect(bG); bG.connect(shipOut); bL.start();
     E.retro = { g: bG, lfo: bL };
     // roadster brake: playful tire-screech (narrow noise band + wobbling sine) + air-brake hiss
-    const tF = F('bandpass', 2300, 14), tS = O('triangle', 1850), tSg = G(0.18), tV = O('sine', 7), tVg = G(40), hF = F('highpass', 4200, 0.7), hG = G(0.5), tG = G(0.0001);
-    nz.connect(tF); tF.connect(tG); tV.connect(tVg); tVg.connect(tS.frequency); tVg.connect(tF.frequency); tS.connect(tSg); tSg.connect(tG); nz.connect(hF); hF.connect(hG); hG.connect(tG); tG.connect(sfxPre); tS.start(); tV.start();
+    const tF = F('bandpass', 2300, 14), tS = O('triangle', 1850), tSg = G(0.18), tV = O('sine', 7), tVg = G(40), hF = F('highpass', 4200, 0.7), hG = G(0.5), tG = G(0.0001), fl1 = O('sine', 17), fl1g = G(0.25), fl2 = O('sine', 26.5), fl2g = G(0.14);
+    nz.connect(tF); tF.connect(tG); tV.connect(tVg); tVg.connect(tS.frequency); tVg.connect(tF.frequency); tS.connect(tSg); tSg.connect(tG); nz.connect(hF); hF.connect(hG); hG.connect(tG); tG.connect(shipOut); tS.start(); tV.start(); fl1.connect(fl1g); fl1g.connect(hG.gain); fl2.connect(fl2g); fl2g.connect(hG.gain); fl1.start(); fl2.start();
     E.screech = { g: tG, s: tS };
     eng = E;
   }
   // st: {fly, speed, prox (0..1), tf, aiming}
   // v3.1.9: render an SFX script offline (OfflineAudioContext) — used to export WAV samples & by e2e. script: [[time, fnName, args?], ...]
   async function renderOffline(script, dur, rate) {
-    rate = rate || 44100; const keep = { ac, comp, master, musBus, sfxBus, musPre, musDuck, sfxPre, echoIn, noiseBuf, tension, hum, rumble, eng, thickGain, thickFilt, aiming, set: Object.assign({}, set), u: [update.t, update.a, update.b], live: liveSrc };
+    rate = rate || 44100; const keep = { ac, comp, master, musBus, sfxBus, musPre, musDuck, sfxPre, echoIn, noiseBuf, shipOut, shipPan, tension, hum, rumble, eng, thickGain, thickFilt, aiming, set: Object.assign({}, set), u: [update.t, update.a, update.b], live: liveSrc };
     const oc = new OfflineAudioContext(2, Math.ceil(dur * rate), rate); ac = oc; offline = true; noiseBuf = null; tension = null; for (const st of script) if (st[0] <= 0 && st[1] === 'configure') Object.assign(set, st[2]); update.t = -1; update.a = update.b = undefined;
     try {
       comp = ac.createDynamicsCompressor(); comp.threshold.value = -16; comp.knee.value = 12; comp.ratio.value = 3.5; comp.attack.value = 0.004; comp.release.value = 0.2;
@@ -207,28 +218,31 @@ window.BHAudio = (() => {
       musDuck = G(1); musPre = G(1); thickGain = G(0); thickFilt = F('lowpass', 200);
       sfxPre = G(1); sfxPre.connect(sfxBus); const revS = ac.createConvolver(); revS.buffer = makeIR(1.8, 3); const revSG = G(0.22); sfxPre.connect(revS); revS.connect(revSG); revSG.connect(sfxBus);
       echoIn = G(1); const dl = ac.createDelay(1.5); dl.delayTime.value = 0.21; const fb = G(0.38); const eLp = F('lowpass', 2600); echoIn.connect(dl); dl.connect(eLp); eLp.connect(fb); fb.connect(dl); eLp.connect(sfxBus); echoIn.connect(sfxPre);
-      startLoops();
-      const api = { configure, update, aimStart, aimPower, aimEnd, launch, bounce, star, win, lose, magnet, key, worm, stop, crash, shield, click, ach };
+      shipChain(); startLoops();
+      const api = { pickShip, configure, update, aimStart, aimPower, aimEnd, launch, bounce, star, win, lose, magnet, key, worm, stop, crash, shield, click, ach };
       const run = st => { const a = st[2]; api[st[1]].apply(null, Array.isArray(a) ? a : a === undefined ? [] : [a]); };
       const byT = new Map(); for (const st of script) { const q = Math.round(st[0] * rate / 128) * 128 / rate; if (!byT.has(q)) byT.set(q, []); byT.get(q).push(st); }
       for (const [q, list] of byT) { if (q <= 0) list.forEach(run); else oc.suspend(q).then(() => { try { list.forEach(run); } catch (e) { console.warn('renderOffline', e); } oc.resume(); }); }
       const buf = await oc.startRendering(); return buf;
     } finally {
-      ({ ac, comp, master, musBus, sfxBus, musPre, musDuck, sfxPre, echoIn, noiseBuf, tension, hum, rumble, eng, thickGain, thickFilt, aiming } = keep); set = keep.set; [update.t, update.a, update.b] = keep.u; offline = false;
+      ({ ac, comp, master, musBus, sfxBus, musPre, musDuck, sfxPre, echoIn, noiseBuf, shipOut, shipPan, tension, hum, rumble, eng, thickGain, thickFilt, aiming } = keep); set = keep.set; [update.t, update.a, update.b] = keep.u; offline = false;
     }
   }
   function update(st) {
-    if (!ac) return; const t = now(); tfNow = st.tf == null ? 1 : st.tf; prox = st.prox || 0; const brk = !!(st.fly && st.braking); if (st.aiming === update.a && brk === update.b && t - (update.t || 0) < 0.05) return; update.t = t; update.a = st.aiming; update.b = brk;
+    if (!ac) return; const t = now(); tfNow = st.tf == null ? 1 : st.tf; prox = st.prox || 0; const brk = !!(st.fly && st.braking), wasB = !!update.b; if (st.aiming === update.a && brk === update.b && t - (update.t || 0) < 0.05) return; update.t = t; update.a = st.aiming; update.b = brk;
     musDuck.gain.setTargetAtTime(st.aiming ? 0.42 : 1, t, 0.18);
     // near holes: a subtle low drone on the current chord root (was much louder before 3.1.5)
     thickGain.gain.setTargetAtTime(Math.pow(prox, 1.5) * 0.13, t, 0.6); thickFilt.frequency.setTargetAtTime(180 + prox * 260, t, 0.6);
     detNow = -(1 - tfNow) * 110;                                   // time-stretch feel: new notes detune down as time dilates
     const sp = st.fly ? Math.min(1, (st.speed || 0) / 520) : 0;
     hum.g.gain.setTargetAtTime(st.fly ? 0.012 + sp * 0.03 : 0.0001, t, 0.08); // generic hull hum, now mostly carried by the ship loops below
-    if (eng) { const k = shipKind(), sh = eng.shuttle, rd = eng.roadster;
+    if (shipPan && shipPan.pan) shipPan.pan.setTargetAtTime(Math.max(-1, Math.min(1, st.pan || 0)) * 0.55, t, 0.08);
+    const dc = Math.max(-1, Math.min(1, st.dop || 0)) * 260; // doppler-ish: approaching a hole bends the engines up, receding bends them down
+    if (eng) { const k = shipKind(), sh = eng.shuttle, rd = eng.roadster; sh.lo.detune.setTargetAtTime(dc, t, 0.08); rd.o[0].detune.setTargetAtTime(dc, t, 0.08); rd.o[1].detune.setTargetAtTime(dc, t, 0.08); rd.wh.detune.setTargetAtTime(dc * 1.4, t, 0.08);
+      if (brk && !wasB) { const t0 = now(); if (k === 'shuttle') { tick(t0, 2600, 0.09); tick(t0 + 0.035, 1900, 0.07); } else tick(t0, 3400, 0.06); }
       sh.g.gain.setTargetAtTime(st.fly && k === 'shuttle' ? 0.05 + sp * 0.11 : 0.0001, t, 0.12); sh.f.frequency.setTargetAtTime(300 + sp * 900, t, 0.1); sh.lo.frequency.setTargetAtTime(42 + sp * 30, t, 0.1);
-      rd.g.gain.setTargetAtTime(st.fly && k === 'roadster' ? 0.035 + sp * 0.06 : 0.0001, t, 0.12); const rpm = 40 + sp * 60; rd.o[0].frequency.setTargetAtTime(rpm, t, 0.08); rd.o[1].frequency.setTargetAtTime(rpm * 1.008, t, 0.08);
-      rd.lp.frequency.setTargetAtTime(380 + sp * 1100, t, 0.1); rd.lfo.frequency.setTargetAtTime(rpm / 4, t, 0.1);
+      rd.g.gain.setTargetAtTime(st.fly && k === 'roadster' ? 0.035 + sp * 0.06 : 0.0001, t, 0.12); const rpm = 40 + sp * 60; rd.o[0].frequency.setTargetAtTime(rpm, t, 0.08); rd.o[1].frequency.setTargetAtTime(rpm * 0.502, t, 0.08);
+      rd.lp.frequency.setTargetAtTime(380 + sp * 1100, t, 0.1); rd.lfo.frequency.setTargetAtTime(rpm / 4, t, 0.1); rd.wh.frequency.setTargetAtTime(700 + sp * 1900, t, 0.1); sh.f.detune.setTargetAtTime(dc, t, 0.08);
       eng.retro.g.gain.setTargetAtTime(brk && k === 'shuttle' ? 0.32 : 0.0001, t, brk ? 0.02 : 0.06); eng.screech.g.gain.setTargetAtTime(brk && k === 'roadster' ? 0.07 : 0.0001, t, brk ? 0.03 : 0.08);
       if (st.fly) lastSet.fly = k; if (brk) lastSet.brake = k; }
      hum.o[0].frequency.setTargetAtTime(44 + sp * 70, t, 0.06); hum.o[1].frequency.setTargetAtTime(44.6 + sp * 71, t, 0.06); hum.f.frequency.setTargetAtTime(160 + sp * 900, t, 0.06);
@@ -236,37 +250,63 @@ window.BHAudio = (() => {
   }
   // ---------- one-shot SFX (scheduled at currentTime for tight timing) ----------
   function aimStart() { if (!ac || tension) return; lastSet.aim = shipKind(); if (shipKind() === 'roadster') return revStart(); const t = now(); const o = O('sawtooth', 90), o2 = O('sine', 135), f = F('lowpass', 420, 4), g = G(0.0001), vib = O('sine', 3), vg = G(4);
-    vib.connect(vg); vg.connect(o.frequency); vg.connect(o2.frequency); o.connect(f); o2.connect(f); f.connect(g); g.connect(sfxPre); o.start(t); o2.start(t); vib.start(t); g.gain.setTargetAtTime(0.03, t, 0.05); tension = { o, o2, f, g, vib }; aiming = true; }
+    vib.connect(vg); vg.connect(o.frequency); vg.connect(o2.frequency); o.connect(f); o2.connect(f); f.connect(g); g.connect(shipOut); o.start(t); o2.start(t); vib.start(t); g.gain.setTargetAtTime(0.03, t, 0.05); tension = { o, o2, f, g, vib }; aiming = true; }
   function aimPower(pct) { if (!tension) return; const t = now(), k = pct / 100; if (tension.rev) return revPower(k); tension.o.frequency.setTargetAtTime(80 + k * 340, t, 0.04); tension.o2.frequency.setTargetAtTime(120 + k * 510, t, 0.04); tension.f.frequency.setTargetAtTime(380 + k * 2600, t, 0.05); tension.g.gain.setTargetAtTime(0.025 + k * 0.06, t, 0.05); tension.vib.frequency.setTargetAtTime(3 + k * 9, t, 0.1); }
   function aimEnd() { if (!tension) return; const t = now(), T = tension; T.g.gain.setTargetAtTime(0.0001, t, 0.03); (T.rev ? T.os : [T.o, T.o2, T.vib]).forEach(o => o.stop(t + 0.2)); tension = null; aiming = false; }
   // roadster aim: engine revving with drag length (rpm, filter and 'chug' rate rise with pull)
-  function revStart() { const t = now(), o1 = O('sawtooth', 42), o2 = O('square', 42.3), o2g = G(0.3), f = F('lowpass', 420, 3), am = G(0.65), lfo = O('sine', 10), lg = G(0.35), g = G(0.0001);
-    o1.connect(f); o2.connect(o2g); o2g.connect(f); f.connect(am); lfo.connect(lg); lg.connect(am.gain); am.connect(g); g.connect(sfxPre); o1.start(t); o2.start(t); lfo.start(t); g.gain.setTargetAtTime(0.05, t, 0.05);
+  function revStart() { const t = now(), o1 = OW(42), o2 = O('sine', 21.1), o2g = G(0.5), f = F('lowpass', 420, 3), am = G(0.65), lfo = O('sine', 10), lg = G(0.35), g = G(0.0001);
+    o1.connect(f); o2.connect(o2g); o2g.connect(f); f.connect(am); lfo.connect(lg); lg.connect(am.gain); am.connect(g); g.connect(shipOut); o1.start(t); o2.start(t); lfo.start(t); g.gain.setTargetAtTime(0.05, t, 0.05);
     tension = { rev: true, os: [o1, o2, lfo], o1, o2, f, lfo, g }; aiming = true; }
-  function revPower(k) { const t = now(), T = tension, rpm = 42 + k * 120; T.o1.frequency.setTargetAtTime(rpm, t, 0.05); T.o2.frequency.setTargetAtTime(rpm * 1.007, t, 0.05); T.f.frequency.setTargetAtTime(420 + k * 2200, t, 0.06); T.lfo.frequency.setTargetAtTime(rpm / 4, t, 0.05); T.g.gain.setTargetAtTime(0.05 + k * 0.07, t, 0.05); }
+  function revPower(k) { const t = now(), T = tension, rpm = 42 + k * 120; T.o1.frequency.setTargetAtTime(rpm, t, 0.05); T.o2.frequency.setTargetAtTime(rpm * 0.502, t, 0.05); T.f.frequency.setTargetAtTime(420 + k * 2200, t, 0.06); T.lfo.frequency.setTargetAtTime(rpm / 4, t, 0.05); T.g.gain.setTargetAtTime(0.05 + k * 0.07, t, 0.05); }
   function launch(pct) { if (!ac) return; aimEnd(); const k = shipKind(); lastSet.launch = k; (k === 'roadster' ? launchRoadster : launchShuttle)(pct || 50); }
   // shuttle: ignition crackle + deep roaring thrust burst (filtered noise sweep + low rumble), scaled by launch power; leaves a fading rocket roar on the engine loop
-  function launchShuttle(pct) { const t = now(), k = 0.45 + pct / 180;
-    const cn = noise(), cf = F('highpass', 2600, 0.7), cg = G(0); cn.connect(cf); cf.connect(cg); cg.connect(sfxPre); cg.gain.setValueAtTime(0, t);
+  function launchShuttle(pct) { const t0 = now(), k = 0.45 + pct / 180, t = t0 + 0.05;
+    tick(t0, 3200, 0.12); tick(t0 + 0.022, 2300, 0.1); tick(t0 + 0.041, 4100, 0.06);
+    { const pn = noise(), pf = F('bandpass', 4200, 1.2), pg = G(0); pn.connect(pf); pf.connect(pg); pg.connect(shipOut); pf.frequency.setValueAtTime(2500, t0); pf.frequency.exponentialRampToValueAtTime(6000, t + 0.02); pg.gain.setValueAtTime(0.0001, t0); pg.gain.linearRampToValueAtTime(0.05 * k, t); pg.gain.exponentialRampToValueAtTime(0.0001, t + 0.08); pn.start(t0); pn.stop(t + 0.1); }
+    { const mn = noise(), mf = F('bandpass', 700, 1.1), ma = G(0.6), ml = O('sine', 31), mlg = G(0.4), mg = G(0); mn.connect(mf); mf.connect(ma); ml.connect(mlg); mlg.connect(ma.gain); ma.connect(mg); mg.connect(shipOut);
+      mg.gain.setValueAtTime(0.0001, t); mg.gain.linearRampToValueAtTime(0.16 * k, t + 0.05); mg.gain.exponentialRampToValueAtTime(0.0001, t + 0.85); mf.frequency.setValueAtTime(900 + pct * 4, t); mf.frequency.exponentialRampToValueAtTime(320, t + 0.8); mn.start(t); mn.stop(t + 0.9); ml.start(t); ml.stop(t + 0.9); }
+    const cn = noise(), cf = F('highpass', 2600, 0.7), cg = G(0); cn.connect(cf); cf.connect(cg); cg.connect(shipOut); cg.gain.setValueAtTime(0, t);
     for (let i = 0; i < 7; i++) { const tt = t + i * 0.018 + Math.random() * 0.01, a = (0.18 + Math.random() * 0.12) * k; cg.gain.setValueAtTime(a, tt); cg.gain.exponentialRampToValueAtTime(0.0005, tt + 0.012); } cn.start(t); cn.stop(t + 0.2);
-    const n = noise(), lp = F('lowpass', 300, 0.9), g = G(0); n.connect(lp); lp.connect(g); g.connect(sfxPre); lp.frequency.setValueAtTime(260, t); lp.frequency.exponentialRampToValueAtTime(1400 + pct * 18, t + 0.12); lp.frequency.exponentialRampToValueAtTime(220, t + 1.1);
-    g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(0.42 * k, t + 0.06); g.gain.exponentialRampToValueAtTime(0.0001, t + 1.2); n.start(t); n.stop(t + 1.3);
-    const s = O('sine', 70), sg = G(0); s.connect(sg); sg.connect(sfxPre); s.frequency.setValueAtTime(78 + pct * 0.3, t); s.frequency.exponentialRampToValueAtTime(32, t + 0.9); env(sg, t, 0.01, 0.7 * k, 0.9); s.start(t); s.stop(t + 1.0);
+    const n = noise(), lp = F('lowpass', 300, 0.9), g = G(0); n.connect(lp); lp.connect(g); g.connect(shipOut); lp.frequency.setValueAtTime(260, t); lp.frequency.exponentialRampToValueAtTime(1400 + pct * 18, t + 0.12); lp.frequency.exponentialRampToValueAtTime(220, t + 1.1);
+    g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(0.36 * k, t + 0.06); g.gain.exponentialRampToValueAtTime(0.0001, t + 1.2); n.start(t); n.stop(t + 1.3);
+    const s = O('sine', 70), sg = G(0); s.connect(sg); sg.connect(shipOut); s.frequency.setValueAtTime(78 + pct * 0.3, t); s.frequency.exponentialRampToValueAtTime(32, t + 0.9); env(sg, t, 0.01, 0.7 * k, 0.9); s.start(t); s.stop(t + 1.0);
     if (eng) { const b = eng.shuttle.boost.gain; b.cancelScheduledValues(t); b.setValueAtTime(0.0001, t); b.linearRampToValueAtTime(0.12 * k, t + 0.25); b.setTargetAtTime(0.0001, t + 0.3, 0.6); } }
   // roadster: starter + short playful 'vroom' (saw/square through an opening filter, rpm rising with power) + cold-gas hiss for the puffs
   function launchRoadster(pct) { const t = now(), k = 0.45 + pct / 180, top = 95 + pct * 1.4;
-    const st = O('square', 38), stf = F('lowpass', 600), sam = G(0.5), stg = G(0); st.connect(stf); stf.connect(sam); sam.connect(stg); stg.connect(sfxPre); const sl = O('square', 18), slg = G(0.5); sl.connect(slg); slg.connect(sam.gain); env(stg, t, 0.005, 0.12, 0.16); sl.start(t); st.start(t); st.stop(t + 0.2); sl.stop(t + 0.2);
-    const t1 = t + 0.1, f = F('lowpass', 500, 4), g = G(0); f.connect(g); g.connect(sfxPre);
-    for (const [type, m, a] of [['sawtooth', 1, 1], ['square', 1.005, 0.45], ['sawtooth', 2.01, 0.25]]) { const o = O(type, 60 * m), og = G(a); o.connect(og); og.connect(f);
-      o.frequency.setValueAtTime(55 * m, t1); o.frequency.exponentialRampToValueAtTime(top * m, t1 + 0.22); o.frequency.exponentialRampToValueAtTime(top * 0.72 * m, t1 + 0.6); o.start(t1); o.stop(t1 + 0.85); }
-    f.frequency.setValueAtTime(420, t1); f.frequency.exponentialRampToValueAtTime(1200 + pct * 22, t1 + 0.2); f.frequency.exponentialRampToValueAtTime(500, t1 + 0.75);
-    g.gain.setValueAtTime(0.0001, t1); g.gain.linearRampToValueAtTime(0.13 * k, t1 + 0.04); g.gain.setTargetAtTime(0.085 * k, t1 + 0.25, 0.1); g.gain.exponentialRampToValueAtTime(0.0001, t1 + 0.8);
-    const n = noise(), hf = F('highpass', 3200, 0.6), hg = G(0); n.connect(hf); hf.connect(hg); hg.connect(sfxPre); env(hg, t, 0.01, 0.12 * k, 0.5); n.start(t); n.stop(t + 0.6);
+    const st = O('square', 38), stf = F('lowpass', 600), sam = G(0.5), stg = G(0); st.connect(stf); stf.connect(sam); sam.connect(stg); stg.connect(shipOut); const sl = O('square', 18), slg = G(0.5); sl.connect(slg); slg.connect(sam.gain); env(stg, t, 0.005, 0.12, 0.16); sl.start(t); st.start(t); st.stop(t + 0.2); sl.stop(t + 0.2);
+    const t1 = t + 0.1, f = F('lowpass', 500, 4), g = G(0); f.connect(g); g.connect(shipOut); const shift = pct > 65;
+    for (const [m, a, sub] of [[1, 1, 0], [0.502, 0.55, 1], [2.003, 0.18, 0]]) { const o = sub ? O('sine', 30) : OW(60 * m), og = G(a); o.connect(og); og.connect(f); const F0 = o.frequency;
+      F0.setValueAtTime(55 * m, t1); F0.exponentialRampToValueAtTime(top * m, t1 + 0.22);
+      if (shift) { F0.setValueAtTime(top * m, t1 + 0.26); F0.exponentialRampToValueAtTime(top * 0.66 * m, t1 + 0.3); F0.exponentialRampToValueAtTime(top * 1.04 * m, t1 + 0.62); F0.exponentialRampToValueAtTime(top * 0.8 * m, t1 + 0.9); }
+      else F0.exponentialRampToValueAtTime(top * 0.72 * m, t1 + 0.6);
+      o.start(t1); o.stop(t1 + (shift ? 1.05 : 0.85)); }
+    f.frequency.setValueAtTime(420, t1); f.frequency.exponentialRampToValueAtTime(1200 + pct * 22, t1 + 0.2);
+    if (shift) { f.frequency.setValueAtTime(1200 + pct * 22, t1 + 0.26); f.frequency.exponentialRampToValueAtTime(600, t1 + 0.3); f.frequency.exponentialRampToValueAtTime(2600, t1 + 0.34); f.frequency.exponentialRampToValueAtTime(1300, t1 + 0.5); f.frequency.exponentialRampToValueAtTime(520, t1 + 0.95); tick(t1 + 0.27, 1800, 0.05); }
+    else f.frequency.exponentialRampToValueAtTime(500, t1 + 0.75);
+    const end = shift ? 1.0 : 0.8; g.gain.setValueAtTime(0.0001, t1); g.gain.linearRampToValueAtTime(0.13 * k, t1 + 0.04); g.gain.setTargetAtTime(0.085 * k, t1 + 0.25, 0.1);
+    if (shift) { g.gain.setValueAtTime(0.05 * k, t1 + 0.28); g.gain.linearRampToValueAtTime(0.12 * k, t1 + 0.34); g.gain.setTargetAtTime(0.08 * k, t1 + 0.4, 0.12); }
+    g.gain.exponentialRampToValueAtTime(0.0001, t1 + end);
+    { const w = O('sine', 600), wg = G(0); w.connect(wg); wg.connect(shipOut); w.frequency.setValueAtTime(500, t1); w.frequency.exponentialRampToValueAtTime(top * 16, t1 + (shift ? 0.6 : 0.4)); env(wg, t1, 0.05, 0.016 * k, end); w.start(t1); w.stop(t1 + end + 0.1); }
+    const n = noise(), hf = F('bandpass', 3600, 0.7), fa = G(0.6), l1 = O('sine', 17), l1g = G(0.28), l2 = O('sine', 26.5), l2g = G(0.16), hg = G(0); n.connect(hf); hf.connect(fa); l1.connect(l1g); l1g.connect(fa.gain); l2.connect(l2g); l2g.connect(fa.gain); fa.connect(hg); hg.connect(shipOut);
+    env(hg, t, 0.01, 0.17 * k, 0.55); n.start(t); n.stop(t + 0.65); l1.start(t); l1.stop(t + 0.65); l2.start(t); l2.stop(t + 0.65);
     if (eng) { const b = eng.roadster.boost.gain; b.cancelScheduledValues(t); b.setValueAtTime(0.0001, t); b.linearRampToValueAtTime(0.05 * k, t1 + 0.3); b.setTargetAtTime(0.0001, t1 + 0.4, 0.5); } }
   // roadster win: friendly dual-tone horn beep-beep
-  function horn(t0) { const f = F('lowpass', 2200, 0.8), g = G(0); f.connect(g); g.connect(sfxPre);
+  function horn(t0) { const f = F('lowpass', 2200, 0.8), g = G(0); f.connect(g); g.connect(shipOut);
     for (const [tt, d] of [[t0, 0.12], [t0 + 0.19, 0.2]]) { for (const fr of [415, 523]) { const o = O('square', fr), og = G(0.5); o.connect(og); og.connect(f); o.start(tt); o.stop(tt + d + 0.03); }
       g.gain.setValueAtTime(0.0001, tt); g.gain.linearRampToValueAtTime(0.06, tt + 0.012); g.gain.setValueAtTime(0.06, tt + d - 0.02); g.gain.linearRampToValueAtTime(0.0001, tt + d); } }
+  // ship picker: shuttle = system-check beeps + relay + spool-up; roadster = key click, starter crank, engine catches and settles to idle
+  function pickShip(kind) { if (!ac) return; const t = now(), out = sfxPre;
+    if (kind === 'roadster') { tick(t, 2800, 0.06, out);
+      const c = OW(28), cf = F('lowpass', 380, 2), ca = G(0.5), cl = O('square', 7.5), clg = G(0.5), cg = G(0); c.connect(cf); cf.connect(ca); cl.connect(clg); clg.connect(ca.gain); ca.connect(cg); cg.connect(out);
+      cg.gain.setValueAtTime(0.0001, t + 0.08); cg.gain.linearRampToValueAtTime(0.12, t + 0.12); cg.gain.setValueAtTime(0.12, t + 0.5); cg.gain.linearRampToValueAtTime(0.0001, t + 0.56); c.start(t + 0.08); c.stop(t + 0.6); cl.start(t + 0.08); cl.stop(t + 0.6);
+      const t1 = t + 0.5, e = OW(40), es = O('sine', 20), esg = G(0.5), ef = F('lowpass', 500, 3), eg = G(0); e.connect(ef); es.connect(esg); esg.connect(ef); ef.connect(eg); eg.connect(out);
+      for (const [o, m] of [[e, 1], [es, 0.502]]) { o.frequency.setValueAtTime(40 * m, t1); o.frequency.exponentialRampToValueAtTime(150 * m, t1 + 0.25); o.frequency.exponentialRampToValueAtTime(52 * m, t1 + 0.8); o.frequency.setTargetAtTime(48 * m, t1 + 0.8, 0.3); o.start(t1); o.stop(t1 + 1.6); }
+      ef.frequency.setValueAtTime(400, t1); ef.frequency.exponentialRampToValueAtTime(2200, t1 + 0.22); ef.frequency.exponentialRampToValueAtTime(520, t1 + 0.85);
+      eg.gain.setValueAtTime(0.0001, t1); eg.gain.linearRampToValueAtTime(0.14, t1 + 0.05); eg.gain.setTargetAtTime(0.06, t1 + 0.3, 0.15); eg.gain.setTargetAtTime(0.0001, t1 + 1.15, 0.12); return; }
+    [[0, 880], [0.11, 988], [0.22, 1175], [0.33, 1318]].forEach(([d, f]) => { const o = O('sine', f), g = G(0); o.connect(g); g.connect(echoIn); env(g, t + d, 0.004, 0.11, 0.08); o.start(t + d); o.stop(t + d + 0.1); });
+    tick(t + 0.47, 2100, 0.07, out); const ok = [1318, 1760], t2 = t + 0.5; ok.forEach(f => { const o = O('triangle', f), g = G(0); o.connect(g); g.connect(echoIn); env(g, t2, 0.01, 0.08, 0.4); o.start(t2); o.stop(t2 + 0.4); });
+    const h = O('sawtooth', 60), hf = F('lowpass', 200, 4), hg = G(0); h.connect(hf); hf.connect(hg); hg.connect(out); h.frequency.setValueAtTime(50, t + 0.45); h.frequency.exponentialRampToValueAtTime(110, t + 1.05); hf.frequency.setValueAtTime(160, t + 0.45); hf.frequency.exponentialRampToValueAtTime(900, t + 1.0);
+    hg.gain.setValueAtTime(0.0001, t + 0.45); hg.gain.linearRampToValueAtTime(0.09, t + 0.85); hg.gain.exponentialRampToValueAtTime(0.0001, t + 1.25); h.start(t + 0.45); h.stop(t + 1.3); }
   function bounce() { if (!ac) return; const t = now(), f0 = 170 + Math.random() * 60;
     [[1, 0.6, 0.22], [2.76, 0.42, 0.14], [5.4, 0.26, 0.09], [8.93, 0.16, 0.06]].forEach(([m, d, a]) => { const o = O('sine', f0 * m), g = G(0); o.connect(g); g.connect(echoIn); env(g, t, 0.002, a, d); o.start(t); o.stop(t + d + 0.05); });
     const b = O('sine', 75), bg = G(0); b.connect(bg); bg.connect(echoIn); b.frequency.setValueAtTime(90, t); b.frequency.exponentialRampToValueAtTime(38, t + 0.4); env(bg, t, 0.003, 0.7, 0.45); b.start(t); b.stop(t + 0.5); }
@@ -301,6 +341,6 @@ window.BHAudio = (() => {
   // while an offline render owns the globals, live game calls are ignored (they would otherwise drive the offline graph)
   const W = f => function () { if (offline) return; return f.apply(null, arguments); };
   return { unlock: W(unlock), suspend: W(suspend), resume: W(resume), configure: W(configure), update: W(update), aimStart: W(aimStart), aimPower: W(aimPower), aimEnd: W(aimEnd), launch: W(launch), bounce: W(bounce), star: W(star), win: W(win), lose: W(lose),
-    magnet: W(magnet), key: W(key), worm: W(worm), stop: W(stop), crash: W(crash), shield: W(shield), click: W(click), ach: W(ach), theme: W(M(theme)), Composer, THEMES, THEME_IDS,
-    renderOffline: (sc, d, r) => offline ? Promise.reject(new Error('busy')) : renderOffline(sc, d, r), get debug() { return { loops: eng ? { shuttle: eng.shuttle.g.gain.value, roadster: eng.roadster.g.gain.value, retro: eng.retro.g.gain.value, screech: eng.screech.g.gain.value } : null, master: master ? master.gain.value : 0, sfx: sfxBus ? sfxBus.gain.value : 0, live: liveSrc, made: madeSrc, sets: Object.assign({}, lastSet), ship: shipKind(), tension: !!tension, theme: themeName, songs: songs.length, layers: song ? Object.keys(song.lg).filter(k => song.lg[k].gain.value > 0.05) : [], mus: musBus ? musBus.gain.value : null, audible: musAudible(), state: ac && ac.state }; }, get on() { return !!ac && ac.state === 'running'; } };
+    magnet: W(magnet), key: W(key), worm: W(worm), pickShip: W(pickShip), stop: W(stop), crash: W(crash), shield: W(shield), click: W(click), ach: W(ach), theme: W(M(theme)), Composer, THEMES, THEME_IDS,
+    renderOffline: (sc, d, r) => offline ? Promise.reject(new Error('busy')) : renderOffline(sc, d, r), get debug() { return { loops: eng ? { shuttle: eng.shuttle.g.gain.value, roadster: eng.roadster.g.gain.value, retro: eng.retro.g.gain.value, screech: eng.screech.g.gain.value } : null, master: master ? master.gain.value : 0, sfx: sfxBus ? sfxBus.gain.value : 0, live: liveSrc, made: madeSrc, sets: Object.assign({}, lastSet), ship: shipKind(), tension: !!tension, theme: themeName, songs: songs.length, layers: song ? Object.keys(song.lg).filter(k => song.lg[k].gain.value > 0.05) : [], mus: musBus ? musBus.gain.value : null, audible: musAudible(), state: ac && ac.state, pan: shipPan ? shipPan.pan.value : null, shipBus: !!shipOut, det: eng ? eng.shuttle.lo.detune.value : null }; }, get on() { return !!ac && ac.state === 'running'; } };
 })();
