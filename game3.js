@@ -1,4 +1,4 @@
-/* Blackhole Battle v3.1.7 — stage 2: visuals, sound, progress (gameplay/physics unchanged from v3.0) */
+/* Blackhole Battle v3.1.8 — stage 2: visuals, sound, progress (gameplay/physics unchanged from v3.0) */
 (() => {
 'use strict';
 const S = window.BHSim;
@@ -828,9 +828,13 @@ function drawBorder() {
 }
 // v3.1.7: the bottom hint card moves up under the HUD while the ship (plus its aim ring/readout) sits behind it, e.g. on short desktop windows
 function avoidHint() { const h = $('hint'); if (!ship || !L || h.style.display === 'none') return; if ((avoidHint.n = (avoidHint.n || 0) + 1) % 6) return;
-  const hh = h.offsetHeight, hw = h.offsetWidth, l = (W - hw) / 2, b0 = H - 24 - hh, sx = X(ship.x), sy = Y(ship.y), rr = Math.max(46, R(64));
-  const hit = sx + rr > l && sx - rr < l + hw && sy + rr > b0 && sy - rr < H - 24;
-  if (hit !== h.classList.contains('up')) { if (hit) { let y = 0; $('hud').querySelectorAll('.col').forEach(c => y = Math.max(y, c.getBoundingClientRect().bottom)); h.style.top = Math.round(y + 10) + 'px'; } h.classList.toggle('up', hit); } }
+  // v3.1.8: only the ship + aim ring count (the readout repositions itself); the card never moves onto the portal — if both spots are taken it stays at the bottom, faded
+  const hh = h.offsetHeight, hw = h.offsetWidth, l = (W - hw) / 2, b0 = H - 24 - hh, sx = X(ship.x), sy = Y(ship.y), rr = Math.max(30, R(34));
+  const over = (cx, cy, r, top, bot) => cx + r > l && cx - r < l + hw && cy + r > top && cy - r < bot;
+  let y = 0; $('hud').querySelectorAll('.col').forEach(c => y = Math.max(y, c.getBoundingClientRect().bottom)); const t0 = Math.round(y + 10);
+  const hitB = over(sx, sy, rr, b0, H - 24), px = X(L.portal[0]), py = Y(L.portal[1]), pr = R(L.pr) + 8;
+  const up = hitB && !over(px, py, pr, t0, t0 + hh) && !over(sx, sy, rr, t0, t0 + hh), fade = hitB && !up;
+  if (up) h.style.top = t0 + 'px'; h.classList.toggle('up', up); h.classList.toggle('fade', fade); }
 function drawFX(dt) {
   ctx.globalCompositeOperation = 'lighter';
   for (let i = parts.length - 1; i >= 0; i--) { const p = parts[i]; p.l -= dt; if (p.l <= 0) { parts.splice(i, 1); continue; } p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= .97; p.vy *= .97; if (p.puff) { const f = 1 - p.l / p.l0, rr = R(p.r * (1 + f * 5)); ctx.globalAlpha = .55 * (1 - f); ctx.drawImage(puffSprite(), X(p.x) - rr, Y(p.y) - rr, rr * 2, rr * 2); continue; }
