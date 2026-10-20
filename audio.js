@@ -1,14 +1,10 @@
-/* Blackhole Battle v3.1 — procedural WebAudio sound (no samples; everything synthesized at runtime) */
+/* Blackhole Battle v3.1.5 — procedural WebAudio sound (no samples; everything synthesized at runtime) */
 window.BHAudio = (() => {
   'use strict';
   let ac = null, comp, master, musBus, sfxBus, musPre, musDuck, sfxPre, echoIn, noiseBuf = null;
-  let set = { snd: true, sfx: 80, mus: 60 };
-  let pad = [], padFilt, padGain, thick, thickFilt, thickGain, sub, schedT = 0, chordIdx = 0, tickT = 0, bellT = 0, timer = null;
+  let set = { snd: true, sfx: 80, mus: 60, musOn: true };
   let tension = null, hum = null, rumble = null, prox = 0, tfNow = 1, aiming = false;
   const mtof = m => 440 * Math.pow(2, (m - 69) / 12);
-  // slow organ-like progression (Am - F - C - G - Am - F - Dm - E)
-  const CHORDS = [[45, 57, 60, 64, 69], [41, 57, 60, 65, 69], [48, 55, 60, 64, 67], [43, 55, 59, 62, 67], [45, 57, 60, 64, 71], [41, 53, 57, 60, 65], [38, 53, 57, 62, 65], [40, 56, 59, 64, 68]];
-  const CH_DUR = 7.5;
   const now = () => ac.currentTime;
 
   function makeIR(sec, decay) {
@@ -38,39 +34,134 @@ window.BHAudio = (() => {
     echoIn = G(1); const dl = ac.createDelay(1.5); dl.delayTime.value = 0.21; const fb = G(0.38); const eLp = F('lowpass', 2600); echoIn.connect(dl); dl.connect(eLp); eLp.connect(fb); fb.connect(dl); eLp.connect(sfxBus); echoIn.connect(sfxPre);
     startMusic(); startLoops(); apply();
   }
-  // ---------- music ----------
-  function startMusic() {
-    padFilt = F('lowpass', 900, 0.7); padGain = G(0.0001); padFilt.connect(padGain); padGain.connect(musPre);
-    const ch = CHORDS[0];
-    for (let v = 0; v < ch.length; v++) for (const dt of [-7, 6]) {
-      const o = O(v === 0 ? 'sine' : 'triangle', mtof(ch[v])); o.detune.value = dt; const g = G(v === 0 ? 0.16 : 0.085); o.connect(g); g.connect(padFilt); o.start(); pad.push({ o, v, dt });
+  // ---------- music (v3.1.5): generative, per-sector themes ----------
+  // A pure Composer (no WebAudio; testable in node) emits note events chord by chord; the renderer below turns them into synth voices.
+  const MODES = { ionian: [0, 2, 4, 5, 7, 9, 11], dorian: [0, 2, 3, 5, 7, 9, 10], phrygian: [0, 1, 3, 5, 7, 8, 10], lydian: [0, 2, 4, 6, 7, 9, 11], mixolydian: [0, 2, 4, 5, 7, 9, 10], aeolian: [0, 2, 3, 5, 7, 8, 10] };
+  // inst: layers that rotate in/out; start: layers on at the beginning; mel: instrument that carries melody phrases; tone: timbre tweaks
+  const THEMES = {
+    menu:      { root: 50, mode: 'lydian',     bpm: 56, inst: ['pad', 'choir', 'bell', 'strings', 'mel'], start: ['pad', 'bell'], mel: 'bell',  tone: { pad: 'triangle', lp: 900,  bright: .8 } },
+    kepler:    { root: 45, mode: 'dorian',     bpm: 72, inst: ['pad', 'pluck', 'arp', 'bell', 'strings', 'mel'], start: ['pad', 'pluck'], mel: 'pluck', tone: { pad: 'sawtooth', lp: 750, bright: 1 } },
+    giant:     { root: 43, mode: 'ionian',     bpm: 64, inst: ['pad', 'bell', 'arp', 'choir', 'strings', 'mel'], start: ['strings', 'bell'], mel: 'bell', tone: { pad: 'triangle', lp: 1100, bright: 1.1 } },
+    magnetar:  { root: 41, mode: 'aeolian',    bpm: 80, inst: ['pluck', 'arp', 'pad', 'strings', 'bell', 'mel'], start: ['arp', 'pad'], mel: 'pluck', tone: { pad: 'sawtooth', lp: 650, bright: .9 } },
+    wormholes: { root: 48, mode: 'mixolydian', bpm: 68, inst: ['pad', 'bell', 'pluck', 'choir', 'arp', 'mel'], start: ['pad', 'choir'], mel: 'choir', tone: { pad: 'triangle', lp: 1000, bright: 1 } },
+    horizon:   { root: 40, mode: 'phrygian',   bpm: 54, inst: ['strings', 'choir', 'pad', 'bell', 'mel'], start: ['strings', 'pad'], mel: 'choir', tone: { pad: 'sawtooth', lp: 600, bright: .75 } },
+  };
+  const THEME_IDS = ['kepler', 'giant', 'magnetar', 'wormholes', 'horizon'];
+  const NEXT = { 0: [3, 4, 5, 1, 2, 5, 3], 1: [4, 6, 3, 0], 2: [5, 3, 0, 1], 3: [0, 4, 1, 5, 6], 4: [0, 5, 3, 2], 5: [3, 1, 4, 0, 2], 6: [0, 2, 5, 3] };
+  function Composer(name, rnd) {
+    const th = THEMES[name] || THEMES.menu; rnd = rnd || Math.random;
+    const sc = MODES[th.mode], beat = 60 / th.bpm, bar = beat * 4;
+    const pitch = d => th.root + sc[((d % 7) + 7) % 7] + 12 * Math.floor(d / 7);
+    const pick = a => a[Math.floor(rnd() * a.length)];
+    const okDeg = d => pitch(d + 4) - pitch(d) === 7;                         // perfect fifth: skip diminished chords
+    let deg = 0, prev = [], clock = 0, nextLay = 18 + rnd() * 16, phraseCool = 1, phraseN = 0, motif = newMotif(), lastChangeAt = 0;
+    const lay = {}; th.inst.forEach(k => lay[k] = { on: th.start.includes(k), off: -99 });
+    function newMotif() { const n = 4 + Math.floor(rnd() * 3), m = []; let s = 0; for (let i = 0; i < n; i++) { m.push({ s, d: pick([.5, .5, 1, 1, 1.5, 2]) }); s += pick([-2, -1, -1, 1, 1, 2, 3, 0]); } return m; }
+    function mutate(m) { m = m.map(o => ({ ...o })); const i = Math.floor(rnd() * m.length); if (rnd() < .5) m[i].s += pick([-1, 1, 2, -2]); else m[i].d = pick([.5, 1, 1.5, 2]); return m; }
+    function vary(m) { let v = m.map(o => ({ ...o })); const op = rnd();
+      if (op < .2) v = v.map(o => ({ ...o, s: -o.s }));                                         // inversion
+      else if (op < .35) { const s = v.map(o => o.s).reverse(); v = v.map((o, i) => ({ ...o, s: s[i] })); } // retrograde pitches
+      else if (op < .5) v = v.map(o => ({ ...o, d: o.d * 2 }));                                 // augmentation
+      else if (op < .62) v = v.slice(0, Math.max(2, v.length - 2));                              // truncation
+      else if (op < .74) { const i = 1 + Math.floor(rnd() * (v.length - 1)); v.splice(i, 0, { s: (v[i - 1].s + v[Math.min(i, v.length - 1)].s) >> 1, d: .5 }); } // passing note
+      if (rnd() < .3) v[Math.floor(rnd() * v.length)].rest = 1;                                 // breathe inside the phrase
+      return v; }
+    const layersOn = () => th.inst.filter(k => lay[k].on);
+    function rotate() { const on = layersOn(), offL = th.inst.filter(k => !lay[k].on);
+      const add = on.length <= 1 || (on.length < 3 && rnd() < .6) || !on.length;
+      const melBack = lay.mel && !lay.mel.on && clock - lay.mel.off > 50 && on.length < 4; // melody never stays away for long
+      const k = melBack ? 'mel' : add ? pick(offL) : pick(on.filter(x => x !== 'mel' || rnd() < .5));
+      if (!k) return; if (lay[k].on) { lay[k].on = false; lay[k].off = clock; } else lay[k].on = true; lastChangeAt = clock; }
+    function next() {
+      if (clock >= nextLay) { rotate(); if (rnd() < .35) rotate(); nextLay = clock + 20 + rnd() * 20; }
+      let c = NEXT[deg].filter(d => okDeg(d) && !prev.slice(-2).includes(d)); if (!c.length) c = [0]; deg = pick(c); prev.push(deg); if (prev.length > 8) prev.shift();
+      const bars = rnd() < .4 ? 2 : 1, dur = bars * bar, r = rnd(), hush = r < .06, rest = !hush && r < .2;
+      const degs = [deg, rnd() < .15 ? deg + 1 : deg + 2, deg + 4]; if (rnd() < .3) degs.push(deg + 6);
+      const ev = [], E = (inst, t, m, d, v, mel) => { if (t < dur) ev.push(mel ? { inst, t, m, d, v, mel: 1 } : { inst, t, m, d, v }); };
+      const live = k => lay[k] && (lay[k].on || clock - lay[k].off < 8);                        // fading-out layers keep playing briefly
+      if (hush) { if (rnd() < .6) degs.slice(0, 3).forEach(d => E('pad', 0, pitch(d) + 12, dur + 1, .25)); }
+      else {
+        if (live('pad')) degs.forEach(d => E('pad', 0, pitch(d) + 12, dur + 1.5, .7 + rnd() * .3));
+        if (live('strings')) { E('strings', 0, pitch(deg) - 12, dur + 1, .9); E('strings', beat * (rnd() < .5 ? 0 : 1), pitch(deg + 4) - 12, dur, .6); }
+        if (live('choir')) [deg + 2, deg + 4, deg + 7].forEach(d => E('choir', rnd() * beat, pitch(d) + 12, dur * .9, .7));
+        if (!rest) {
+          if (live('arp')) { const tones = []; degs.forEach(d => { tones.push(pitch(d) + 12, pitch(d) + 24); }); tones.sort((a, b) => a - b);
+            const pat = pick(['up', 'down', 'updown', 'rand']), half = rnd() < .4; let i = 0;
+            for (let t = half ? dur / 2 : 0; t < dur - .01; t += beat / 2, i++) { if (rnd() < .22) continue; const n = tones.length;
+              const j = pat === 'up' ? i % n : pat === 'down' ? n - 1 - i % n : pat === 'updown' ? (i % (2 * n - 2) < n ? i % (2 * n - 2) : 2 * n - 2 - i % (2 * n - 2)) : Math.floor(rnd() * n);
+              E('arp', t, tones[j], beat * .9, .5 + rnd() * .3); } }
+          if (live('pluck')) { const rh = pick([[0, 1.5, 2.5], [0, 2], [0, .75, 1.5, 3], [1, 2.5], [0, 3]]);
+            for (let b = 0; b < bars; b++) rh.forEach(x => { if (rnd() < .85) E('pluck', (b * 4 + x) * beat, pitch(pick(degs)) + pick([12, 24]), beat * 1.5, .6 + rnd() * .3); }); }
+          if (live('bell')) { const n = 1 + (rnd() < .4); for (let k = 0; k < n; k++) E('bell', Math.floor(rnd() * bars * 4) * beat, pitch(pick(degs)) + pick([24, 36]), 3.5, .55 + rnd() * .3); }
+          if (live('mel') && --phraseCool <= 0) {
+            phraseN++; if (phraseN % 3 === 0) motif = mutate(motif); if (phraseN % 14 === 0) motif = newMotif();
+            const v = vary(motif), oct = th.mel === 'choir' ? 12 : 24; let t = pick([0, beat, beat * 2]);
+            const base = deg + pick([0, 2, 4]);
+            for (const o of v) { if (!o.rest) E(th.mel, t, pitch(base + o.s) + oct, o.d * beat * 1.2, .75, 1); t += o.d * beat; }
+            phraseCool = 1 + Math.floor(rnd() * 3); }
+        }
+      }
+      const out = { t0: clock, dur, deg, degs, bars, hush, rest, layers: layersOn(), root: pitch(deg), ev };
+      clock += dur; return out;
     }
-    // organ shimmer: upper octave sines with slow tremolo
-    const shim = G(0.03), trem = O('sine', 0.17), tg = G(0.02); trem.connect(tg); tg.connect(shim.gain); trem.start();
-    for (let v = 2; v < 5; v++) { const o = O('sine', mtof(ch[v] + 12)); o.connect(shim); o.start(); pad.push({ o, v, up: 1 }); }
-    shim.connect(padFilt);
-    // "thick" layer near black holes: low saw drone + sub
-    thickFilt = F('lowpass', 260, 1.2); thickGain = G(0.0001); thickFilt.connect(thickGain); thickGain.connect(musPre);
-    thick = [O('sawtooth', mtof(ch[0])), O('sawtooth', mtof(ch[0]) * 1.005)]; thick.forEach(o => { o.connect(thickFilt); o.start(); });
-    sub = O('sine', mtof(ch[0]) / 2); const sg = G(0.5); sub.connect(sg); sg.connect(thickFilt); sub.start();
-    padGain.gain.setTargetAtTime(1, now(), 2.5);
-    schedT = now() + CH_DUR; tickT = now() + 1; bellT = now() + 2.5;
-    timer = setInterval(sched, 90);
+    return { next, th, get clock() { return clock; } };
   }
-  function setChord(i, t) {
-    const ch = CHORDS[i % CHORDS.length];
-    for (const p of pad) p.o.frequency.setTargetAtTime(mtof(ch[p.v] + (p.up ? 12 : 0)), t, 0.9);
-    thick[0].frequency.setTargetAtTime(mtof(ch[0]), t, 1.2); thick[1].frequency.setTargetAtTime(mtof(ch[0]) * 1.005, t, 1.2); sub.frequency.setTargetAtTime(mtof(ch[0]) / 2, t, 1.2);
+  // ---------- renderer ----------
+  let songs = [], song = null, themeName = null, thick, thickFilt, thickGain, sub, timer = null, detNow = 0, lastRoot = 45;
+  const LAYER_FADE = 2.4;                                                              // time constant: ~7 s audible fade in/out
+  function newSong(name) {
+    const comp = Composer(name), out = G(0.0001); out.connect(musPre);
+    const tone = comp.th.tone, lg = {};
+    for (const k of comp.th.inst) { const g = G(comp.th.start.includes(k) ? 1 : 0.0001); g.connect(out); lg[k] = g; }
+    const padLP = F('lowpass', tone.lp, 0.6); padLP.connect(lg.pad || out);
+    return { name, comp, out, lg, padLP, tone, nextT: now() + 0.15, born: now(), dead: false };
   }
+  function theme(name) {
+    if (!ac) { themeName = name; return; } if (name === themeName && song) return; themeName = name; const t = now();
+    for (const s of songs) if (!s.dead) { s.out.gain.cancelScheduledValues(t); s.out.gain.setTargetAtTime(0.0001, t, 1.1); s.dead = true; s.dieAt = t + 7; }
+    const back = songs.find(s => s.dead && s.name === name);                     // switching back quickly: revive the fading song (no restart)
+    if (back) { back.dead = false; back.nextT = Math.max(back.nextT, t + 0.1); song = back; } else { song = newSong(name); songs.push(song); }
+    song.out.gain.cancelScheduledValues(t); song.out.gain.setTargetAtTime(1, t, 1.3);
+    const dying = songs.filter(s => s.dead).sort((x, y) => x.dieAt - y.dieAt);   // rapid hopping: keep at most 2 fading songs
+    while (dying.length > 2) { const s = dying.shift(); s.out.gain.setTargetAtTime(0.0001, t, 0.25); s.dieAt = Math.min(s.dieAt, t + 1.5); }
+  }
+  function startMusic() {
+    thickFilt = F('lowpass', 220, 1); thickGain = G(0.0001); thickFilt.connect(thickGain); thickGain.connect(musPre);
+    thick = [O('sawtooth', mtof(lastRoot - 12)), O('sawtooth', mtof(lastRoot - 12) * 1.005)]; thick.forEach(o => { o.connect(thickFilt); o.start(); });
+    sub = O('sine', mtof(lastRoot - 24)); const sg = G(0.5); sub.connect(sg); sg.connect(thickFilt); sub.start();
+    theme(themeName || 'menu'); timer = setInterval(sched, 100);
+  }
+  const musAudible = () => set.snd && set.musOn !== false && set.mus > 0;
   function sched() {
     if (!ac || ac.state !== 'running') return; const t = now();
-    while (schedT < t + 0.3) { chordIdx++; setChord(chordIdx, schedT); schedT += CH_DUR; }
-    // clock ticks (tempo slows as time dilates)
-    while (tickT < t + 0.3) { tickClick(tickT); tickT += 1.25 / Math.max(0.55, tfNow); }
-    while (bellT < t + 0.3) { const ch = CHORDS[chordIdx % CHORDS.length]; const n = ch[1 + Math.floor(Math.random() * 4)] + 12; musBell(bellT, mtof(n)); bellT += 2.5 * (1 + Math.floor(Math.random() * 2)); }
+    songs = songs.filter(s => { if (s.dead && t > s.dieAt) { try { s.out.disconnect(); } catch (e) {} return false; } return true; });
+    for (const s of songs) {
+      while (s.nextT < t + 0.5) { const ch = s.comp.next();
+        if (!s.dead && musAudible()) { // silent music costs nothing: skip voice creation entirely
+          for (const k in s.lg) s.lg[k].gain.setTargetAtTime(ch.layers.includes(k) ? 1 : 0.0001, s.nextT, LAYER_FADE);
+          for (const e of ch.ev) voice(s, e.inst, s.nextT + e.t, e.m, e.d, e.v, e.mel);
+          if (s === song) { lastRoot = ch.root; const ft = s.nextT; thick[0].frequency.setTargetAtTime(mtof(ch.root - 12), ft, 1.2); thick[1].frequency.setTargetAtTime(mtof(ch.root - 12) * 1.005, ft, 1.2); sub.frequency.setTargetAtTime(mtof(ch.root - 24), ft, 1.2); }
+        }
+        s.nextT += ch.dur; }
+    }
   }
-  function tickClick(t) { const n = noise(), f = F('bandpass', 3800, 6), g = G(0); n.connect(f); f.connect(g); g.connect(musPre); env(g, t, 0.002, 0.07, 0.05); n.start(t, Math.random()); n.stop(t + 0.08); }
-  function musBell(t, f) { const o = O('sine', f), o2 = O('sine', f * 2.003), g = G(0), g2 = G(0.25); o.connect(g); o2.connect(g2); g2.connect(g); g.connect(musPre); env(g, t, 0.02, 0.045, 3); o.start(t); o2.start(t); o.stop(t + 3.2); o2.stop(t + 3.2); }
+  function osc(type, m, t, dest, det) { const o = O(type, mtof(m)); o.detune.value = detNow + (det || 0); o.connect(dest); o.start(t); return o; }
+  function voice(s, inst, t, m, d, v, mel) {
+    const tone = s.tone, dest = (mel ? s.lg.mel : s.lg[inst]) || s.out;
+    if (inst === 'pad') { const g = G(0); g.connect(s.padLP); const a = 1.6 + Math.random(); g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(0.032 * v, t + a); g.gain.setTargetAtTime(0.0001, t + Math.max(a, d - 1.5), 0.9);
+      [-8, 7].forEach(dt => osc(tone.pad, m, t, g, dt).stop(t + d + 4)); }
+    else if (inst === 'strings') { const f = F('lowpass', 520 * tone.bright, 0.7), g = G(0); f.connect(g); g.connect(dest); g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(0.05 * v, t + 2.2); g.gain.setTargetAtTime(0.0001, t + Math.max(2.2, d - 1), 1);
+      const lfo = O('sine', 4.6 + Math.random()), lg = G(7); lfo.connect(lg); lfo.start(t); lfo.stop(t + d + 5);
+      [-6, 6].forEach(dt => { const o = osc('sawtooth', m, t, f, dt); lg.connect(o.detune); o.stop(t + d + 5); }); }
+    else if (inst === 'choir') { const g = G(0), f1 = F('bandpass', 700, 4), f2 = F('bandpass', 1150, 5), lp = F('lowpass', 2200); f1.connect(lp); f2.connect(lp); lp.connect(g); g.connect(dest);
+      const a = d < 2 ? 0.25 : 1.3; g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(0.09 * v, t + a); g.gain.setTargetAtTime(0.0001, t + Math.max(a, d - .4), d < 2 ? .35 : .9);
+      [-11, 0, 12].forEach(dt => { const o = osc('sawtooth', m, t, f1, dt); o.connect(f2); o.stop(t + d + 4); }); }
+    else if (inst === 'pluck') { const f = F('lowpass', 2800 * tone.bright, 1), g = G(0); f.connect(g); g.connect(dest); f.frequency.setValueAtTime(3200 * tone.bright, t); f.frequency.exponentialRampToValueAtTime(500, t + .5);
+      env(g, t, 0.005, 0.07 * v, Math.min(1.6, d + .5)); osc('triangle', m, t, f).stop(t + 2.2); osc('sine', m + 12, t, f, 3).stop(t + 2.2); }
+    else if (inst === 'bell') { const g = G(0); g.connect(dest); env(g, t, 0.01, 0.045 * v, d);
+      [[1, 1], [2.76, .22], [5.4, .07]].forEach(([r, a]) => { const o = O('sine', mtof(m) * r), og = G(a); o.detune.value = detNow; o.connect(og); og.connect(g); o.start(t); o.stop(t + d + .2); }); }
+    else if (inst === 'arp') { const g = G(0); g.connect(dest); env(g, t, 0.02, 0.035 * v, .45 + d * .3); osc('sine', m, t, g).stop(t + 1.2); osc('triangle', m + 12, t, g, 4).stop(t + 1.2); }
+  }
   // ---------- continuous loops: engine hum, black-hole rumble ----------
   function startLoops() {
     const hf = F('lowpass', 240, 3), hg = G(0.0001); const h1 = O('sawtooth', 52), h2 = O('square', 52.7), hm = G(0.35); h1.connect(hf); h2.connect(hm); hm.connect(hf); hf.connect(hg); hg.connect(sfxPre); h1.start(); h2.start();
@@ -83,9 +174,9 @@ window.BHAudio = (() => {
   function update(st) {
     if (!ac) return; const t = now(); tfNow = st.tf == null ? 1 : st.tf; prox = st.prox || 0; if (st.aiming === update.a && t - (update.t || 0) < 0.05) return; update.t = t; update.a = st.aiming;
     musDuck.gain.setTargetAtTime(st.aiming ? 0.42 : 1, t, 0.18);
-    thickGain.gain.setTargetAtTime(Math.pow(prox, 1.3) * 0.32, t, 0.25); padFilt.frequency.setTargetAtTime(800 + prox * 1600, t, 0.3); thickFilt.frequency.setTargetAtTime(200 + prox * 500, t, 0.3);
-    // time-stretch feel: whole pad detunes down as time dilates
-    const det = -(1 - tfNow) * 140; for (const p of pad) p.o.detune.setTargetAtTime(det + (p.dt || 0), t, 0.3);
+    // near holes: a subtle low drone on the current chord root (was much louder before 3.1.5)
+    thickGain.gain.setTargetAtTime(Math.pow(prox, 1.5) * 0.13, t, 0.6); thickFilt.frequency.setTargetAtTime(180 + prox * 260, t, 0.6);
+    detNow = -(1 - tfNow) * 110;                                   // time-stretch feel: new notes detune down as time dilates
     const sp = st.fly ? Math.min(1, (st.speed || 0) / 520) : 0;
     hum.g.gain.setTargetAtTime(st.fly ? 0.03 + sp * 0.07 : 0.0001, t, 0.08); hum.o[0].frequency.setTargetAtTime(44 + sp * 70, t, 0.06); hum.o[1].frequency.setTargetAtTime(44.6 + sp * 71, t, 0.06); hum.f.frequency.setTargetAtTime(160 + sp * 900, t, 0.06);
     rumble.g.gain.setTargetAtTime(Math.pow(prox, 1.6) * 0.6, t, 0.12); rumble.s.frequency.setTargetAtTime(22 + 14 * tfNow, t, 0.2); rumble.lfo.frequency.setTargetAtTime(0.5 + 2.6 * prox * tfNow, t, 0.2);
@@ -121,7 +212,7 @@ window.BHAudio = (() => {
   function ach() { if (!ac) return; phrase([76, 81, 85, 88], 0.08, 'sine', 0.06, 0.9); }
   // ---------- control ----------
   function apply() { if (!ac) return; const t = now();
-    master.gain.setTargetAtTime(set.snd ? 0.9 : 0, t, 0.05); musBus.gain.setTargetAtTime(Math.pow(set.mus / 100, 2) * 0.9, t, 0.08); sfxBus.gain.setTargetAtTime(Math.pow(set.sfx / 100, 2) * 1.1, t, 0.05); }
+    master.gain.setTargetAtTime(set.snd ? 0.9 : 0, t, 0.05); musBus.gain.setTargetAtTime(set.musOn === false ? 0 : Math.pow(set.mus / 100, 2) * 0.9, t, 0.25); sfxBus.gain.setTargetAtTime(Math.pow(set.sfx / 100, 2) * 1.1, t, 0.05); }
   function configure(s) { set = Object.assign(set, s); apply(); }
   function unlock() {
     if (!ac) { try { const C = window.AudioContext || window.webkitAudioContext; if (!C) return; ac = new C({ latencyHint: 'interactive' }); build(); } catch (e) { ac = null; return; } }
@@ -129,6 +220,7 @@ window.BHAudio = (() => {
   }
   function suspend() { if (ac && ac.state === 'running') ac.suspend(); }
   function resume() { if (ac && ac.state === 'suspended') ac.resume(); }
-  document.addEventListener('visibilitychange', () => document.hidden ? suspend() : resume());
-  return { unlock, suspend, resume, configure, update, aimStart, aimPower, aimEnd, launch, bounce, star, win, lose, magnet, key, worm, stop, crash, shield, click, ach, get on() { return !!ac && ac.state === 'running'; } };
+  if (typeof document !== 'undefined') document.addEventListener('visibilitychange', () => document.hidden ? suspend() : resume());
+  return { unlock, suspend, resume, configure, update, aimStart, aimPower, aimEnd, launch, bounce, star, win, lose, magnet, key, worm, stop, crash, shield, click, ach, theme, Composer, THEMES, THEME_IDS,
+    get debug() { return { theme: themeName, songs: songs.length, layers: song ? Object.keys(song.lg).filter(k => song.lg[k].gain.value > 0.05) : [], mus: musBus ? musBus.gain.value : null, audible: musAudible(), state: ac && ac.state }; }, get on() { return !!ac && ac.state === 'running'; } };
 })();

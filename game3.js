@@ -1,4 +1,4 @@
-/* Blackhole Battle v3.1.4 — stage 2: visuals, sound, progress (gameplay/physics unchanged from v3.0) */
+/* Blackhole Battle v3.1.5 — stage 2: visuals, sound, progress (gameplay/physics unchanged from v3.0) */
 (() => {
 'use strict';
 const S = window.BHSim;
@@ -23,7 +23,7 @@ function rng(seed) { let s = seed >>> 0 || 1; return () => (s = (s * 1664525 + 1
 const KEY = 'bh_v3';
 let save; try { save = JSON.parse(localStorage.getItem(KEY)) || null; } catch (e) { save = null; }
 save = Object.assign({ unlocked: 1, best: {}, tut: {}, pu: { extra: 0, scan: 0, shield: 0, slow: 0 }, streak: 0, ach: {}, set: {} }, save || {});
-save.set = Object.assign({ vib: true, snd: true, sfx: 80, mus: 60, q: 'auto', facts: 'win' }, save.set || {}); PR.ensure(save);
+save.set = Object.assign({ vib: true, snd: true, sfx: 80, mus: 60, musOn: true, ship: 'shuttle', q: 'auto', facts: 'win' }, save.set || {}); PR.ensure(save);
 save.facts = save.facts || {}; save.lfail = save.lfail || {}; save.hintOk = save.hintOk || {}; /* per-level failures + earned 'ideal path' hints */ I18N.set(save.set.lang); const FACTS = window.BH_FACTS || {}; const lvName = i => I18N.lvName(LID(i), LEVELS[i].n);
 const isOpen = i => CAT.levelOpen(save, i), bestOf = i => save.best[LID(i)];
 const persist = () => { try { localStorage.setItem(KEY, JSON.stringify(save)); } catch (e) {} };
@@ -145,7 +145,7 @@ let active = {}, scanArmed = false, shieldOn = false, slowT = 0, heartT = 0, pre
 
 function startLevel(i, keepGhost) {
   if (!keepGhost || ghostLevel !== i) { ghost = null; }
-  hintPath = null; li = i; ensureBG(SECTORS[CAT.secOf[i]].pal); L = S.prep(LEVELS[i]); L.skin = resolveSkins(LID(i), L); ship = S.newShip(L); ship.ang = -Math.PI / 2;
+  hintPath = null; li = i; ensureBG(SECTORS[CAT.secOf[i]].pal); AU.theme(secTheme(CAT.secOf[i])); L = S.prep(LEVELS[i]); L.skin = resolveSkins(LID(i), L); ship = S.newShip(L); ship.ang = -Math.PI / 2;
   launchesLeft = L.L; collected = new Set(); clock = 0; started = false; resetInput();
   trail = []; attempt = []; parts = []; pops = []; aim = null; preview = []; tf = 1; active = {}; scanArmed = false; shieldOn = false; slowT = 0;
   planetCache = {}; camWY = clampCam(ship.y); Z = 1; camCX = 180; camCY = camWY + 320; fl = { bounces: 0, margin: 1e9 }; AU.aimEnd(); state = 'aim'; show(null); $('hud').style.display = 'flex'; $('hTime').textContent = '0.0';
@@ -207,7 +207,7 @@ function launch(a, p) {
   resetInput(); launchT = performance.now(); flySteps = 0; hintPath = null; $('bHintPath').style.display = 'none'; trap = S.trapNew(ship, L); trapT = 0; setTrapHint(false);
   launchesLeft--; started = true; state = 'fly'; aim = null; thrust = 0.35; ship.scan = scanArmed; preview = []; scanArmed = false;
   if (active.slow && !active.slowUsed) { slowT = 3; active.slowUsed = 1; }
-  for (let i = 0; i < 18; i++) spark(ship.x, ship.y, '#22d3ee', 60 + Math.random() * 90, a + Math.PI + (Math.random() - .5) * 1.2);
+  for (let i = 0; i < 18; i++) (save.set.ship === 'roadster' ? puff(ship.x - Math.cos(a) * 11, ship.y - Math.sin(a) * 11, -Math.cos(a + (Math.random() - .5) * .9) * (50 + Math.random() * 80), -Math.sin(a + (Math.random() - .5) * .9) * (50 + Math.random() * 80)) : spark(ship.x, ship.y, '#22d3ee', 60 + Math.random() * 90, a + Math.PI + (Math.random() - .5) * 1.2));
   $('hint').style.display = 'none'; $('hand').style.display = 'none'; $('pu').style.display = 'none'; placeAch();
   if (li === 0) { save.tut.aim = 1; persist(); }
   HAP.launch(); AU.launch(p / S.MAX_PULL * 100); save.stats.launches++; hud();
@@ -631,11 +631,12 @@ function drawShuttle() {
   if (L && state === 'fly' && (slowT > 0 || tf < 0.75) && trail.length > 16) { for (let e = 4; e >= 1; e--) { const p = trail[Math.max(0, trail.length - 1 - e * 4)]; ctx.globalAlpha = 0.09 * (5 - e); drawHull(X(p.x), Y(p.y), ang, 1, 0, null, true); } ctx.globalAlpha = 1; }
   drawHull(x, y, ang, st, sa, lightAt(ship.x, ship.y), false);
 }
-function drawHull(x, y, ang, st, sa, lt, ghostly) {
+function drawHull(x, y, ang, st, sa, lt, ghostly, kk, kind) {
   ctx.save(); ctx.translate(x, y);
   if (st > 1.01) { ctx.rotate(sa); ctx.scale(st, 1 / Math.sqrt(st)); ctx.rotate(-sa); }
-  ctx.rotate(ang); const k = R(1);
-  const fl0 = state === 'fly' && !braking ? 0.6 + thrust * 2 : state === 'aim' ? 0.25 : 0;
+  ctx.rotate(ang); const k = kk || R(1), rd = (kind || save.set.ship) === 'roadster';
+  if (rd) { if (shieldOn && !ghostly && !kk) { ctx.strokeStyle = `rgba(103,232,249,${.5 + .3 * Math.sin(animT * 6)})`; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(0, 0, 17 * k, 0, 7); ctx.stroke(); } drawRoadster(k, lt, ghostly); ctx.restore(); return; }
+  const fl0 = !kk && state === 'fly' && !braking ? 0.6 + thrust * 2 : state === 'aim' ? 0.25 : 0;
   if (fl0 > 0 && !ghostly) { const pc = ctx.globalCompositeOperation; ctx.globalCompositeOperation = 'lighter'; const len = (14 + Math.random() * 6) * fl0 * k; const g = ctx.createLinearGradient(-8 * k, 0, -8 * k - len, 0); g.addColorStop(0, 'rgba(255,255,255,.95)'); g.addColorStop(.3, 'rgba(56,189,248,.9)'); g.addColorStop(1, 'rgba(124,58,237,0)'); ctx.fillStyle = g; ctx.beginPath(); ctx.moveTo(-8 * k, -3.5 * k); ctx.quadraticCurveTo(-8 * k - len, 0, -8 * k, 3.5 * k); ctx.fill();
     glow(-9 * k, 0, 9 * k * fl0, 'rgba(56,189,248,A)', .5); ctx.globalCompositeOperation = pc; }
   if (braking && !ghostly) { ctx.fillStyle = 'rgba(251,146,60,.85)'; for (const s of [-1, 1]) { ctx.beginPath(); ctx.moveTo(9 * k, s * 3 * k); ctx.lineTo((16 + Math.random() * 6) * k, s * (6 + Math.random() * 3) * k); ctx.lineTo(9 * k, s * 5 * k); ctx.fill(); } }
@@ -653,6 +654,44 @@ function drawHull(x, y, ang, st, sa, lt, ghostly) {
   ctx.fillStyle = 'rgba(255,255,255,.7)'; ctx.beginPath(); ctx.ellipse(6.8 * k, -.8 * k, 1.1 * k, .6 * k, 0, 0, 7); ctx.fill();
   ctx.restore();
 }
+// Roadster (v3.1.5, visual only — same hitbox/physics as the shuttle): generic red open-top sports car, mannequin driver in a spacesuit,
+// cold-gas thrusters (white puffs, no fire) at the rear/front corners. Top-down, nose along +x.
+function drawRoadster(k, lt, ghostly) {
+  const rr = (x, y, w, h, r) => { ctx.beginPath(); ctx.roundRect ? ctx.roundRect(x, y, w, h, r) : ctx.rect(x, y, w, h); };
+  ctx.fillStyle = ghostly ? '#a5b4fc' : '#0f172a'; for (const [wx, wy] of [[7, -6.4], [7, 4.2], [-7.5, -6.6], [-7.5, 4.4]]) { rr(wx * k - 2.4 * k, wy * k, 4.8 * k, 2.2 * k, k); ctx.fill(); } // tyres
+  if (!ghostly) { ctx.fillStyle = '#94a3b8'; for (const [wx, wy] of [[7, -6.4], [7, 4.2], [-7.5, -6.6], [-7.5, 4.4]]) ctx.fillRect(wx * k - 1 * k, (wy + .7) * k, 2 * k, .8 * k); } // rims
+  const body = () => { ctx.beginPath(); ctx.moveTo(13.5 * k, -2.2 * k); ctx.quadraticCurveTo(14 * k, 0, 13.5 * k, 2.2 * k); ctx.quadraticCurveTo(8 * k, 5.6 * k, 2 * k, 5.4 * k); ctx.lineTo(-8 * k, 5.7 * k);
+    ctx.quadraticCurveTo(-11.5 * k, 5.5 * k, -11.5 * k, 3 * k); ctx.lineTo(-11.5 * k, -3 * k); ctx.quadraticCurveTo(-11.5 * k, -5.5 * k, -8 * k, -5.7 * k); ctx.lineTo(2 * k, -5.4 * k); ctx.quadraticCurveTo(8 * k, -5.6 * k, 13.5 * k, -2.2 * k); ctx.closePath(); };
+  const g = ctx.createLinearGradient(0, -6 * k, 0, 6 * k); g.addColorStop(0, '#fca5a5'); g.addColorStop(.25, '#ef4444'); g.addColorStop(.7, '#b91c1c'); g.addColorStop(1, '#7f1d1d');
+  ctx.fillStyle = ghostly ? '#c7d2fe' : g; body(); ctx.fill(); if (ghostly) { ctx.restore && 0; return; }
+  ctx.strokeStyle = 'rgba(127,29,29,.9)'; ctx.lineWidth = .6 * k; body(); ctx.stroke();
+  ctx.strokeStyle = 'rgba(254,202,202,.55)'; ctx.lineWidth = .5 * k; ctx.beginPath(); ctx.moveTo(12 * k, -1.6 * k); ctx.quadraticCurveTo(8 * k, -3.6 * k, 4 * k, -3.8 * k); ctx.moveTo(12 * k, 1.6 * k); ctx.quadraticCurveTo(8 * k, 3.6 * k, 4 * k, 3.8 * k); ctx.stroke(); // hood creases
+  ctx.fillStyle = '#1f2937'; rr(-7.5 * k, -4.4 * k, 9.5 * k, 8.8 * k, 2 * k); ctx.fill();                                   // open cockpit
+  ctx.fillStyle = 'rgba(125,211,252,.55)'; ctx.beginPath(); ctx.moveTo(3.4 * k, -4.6 * k); ctx.quadraticCurveTo(5 * k, 0, 3.4 * k, 4.6 * k); ctx.lineTo(2.3 * k, 4.4 * k); ctx.quadraticCurveTo(3.8 * k, 0, 2.3 * k, -4.4 * k); ctx.closePath(); ctx.fill(); // windscreen
+  ctx.fillStyle = '#7f1d1d'; rr(-7 * k, -3.9 * k, 3 * k, 3.4 * k, .8 * k); ctx.fill(); rr(-7 * k, .5 * k, 3 * k, 3.4 * k, .8 * k); ctx.fill(); // seats
+  // mannequin driver in a white spacesuit (left seat): shoulders, arm to the wheel, helmet with dark visor facing forward
+  ctx.fillStyle = '#f1f5f9'; ctx.beginPath(); ctx.ellipse(-4.2 * k, -2.2 * k, 1.6 * k, 3 * k, 0, 0, 7); ctx.fill();
+  ctx.strokeStyle = '#e2e8f0'; ctx.lineWidth = 1.1 * k; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(-3.6 * k, -3.6 * k); ctx.lineTo(.4 * k, -2.6 * k); ctx.stroke(); ctx.lineCap = 'butt';
+  ctx.strokeStyle = '#111827'; ctx.lineWidth = .7 * k; ctx.beginPath(); ctx.arc(1 * k, -2.2 * k, 1.1 * k, 0, 7); ctx.stroke();             // steering wheel
+  ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(-3.6 * k, -2.2 * k, 2.1 * k, 0, 7); ctx.fill();
+  ctx.fillStyle = '#0f172a'; ctx.beginPath(); ctx.arc(-3.6 * k, -2.2 * k, 1.5 * k, -1.1, 1.1); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = 'rgba(253,224,71,.8)'; ctx.beginPath(); ctx.arc(-2.6 * k, -2.8 * k, .35 * k, 0, 7); ctx.fill();                   // visor glint
+  ctx.fillStyle = '#fde68a'; for (const s of [-1, 1]) { ctx.beginPath(); ctx.ellipse(12.6 * k, s * 2.6 * k, .9 * k, .6 * k, 0, 0, 7); ctx.fill(); } // headlights
+  ctx.fillStyle = '#f87171'; for (const s of [-1, 1]) ctx.fillRect(-11.6 * k, s * 3.6 * k - .6 * k, .8 * k, 1.2 * k);              // tail lights
+  ctx.fillStyle = '#cbd5e1'; for (const [nx, ny] of [[-11.3, -2.2], [-11.3, 2.2], [13, -4.2], [13, 4.2]]) { ctx.beginPath(); ctx.arc(nx * k, ny * k, .7 * k, 0, 7); ctx.fill(); } // gas nozzles
+  if (lt) { const la = lt.a - ship.ang, lx = Math.cos(la) * 8 * k, ly = Math.sin(la) * 8 * k, lg = ctx.createLinearGradient(lx, ly, -lx, -ly);
+    lg.addColorStop(0, `rgba(${lt.c},${.45 * lt.k})`); lg.addColorStop(.5, 'rgba(0,0,0,0)'); lg.addColorStop(1, 'rgba(2,6,23,.45)'); ctx.fillStyle = lg; body(); ctx.fill(); }
+}
+// cold-gas puff (world coords): soft white cloud that expands and fades
+function puff(x, y, vx, vy) { parts.push({ x, y, vx, vy, l: .55 + Math.random() * .4, l0: .95, c: '#fff', r: 1.6 + Math.random(), puff: 1 }); }
+function roadsterJets() { const a = ship.ang, ca = Math.cos(a), sa = Math.sin(a), W = (lx, ly) => [ship.x + ca * lx - sa * ly, ship.y + sa * lx + ca * ly];
+  if (thrust > 0.02) for (const s of [-2.2, 2.2]) for (let q = 0; q < 2; q++) { const [x, y] = W(-12, s); const j = (Math.random() - .5) * .5; puff(x, y, ship.vx * .3 - Math.cos(a + j) * (70 + Math.random() * 60), ship.vy * .3 - Math.sin(a + j) * (70 + Math.random() * 60)); }
+  if (braking) for (const s of [-4.2, 4.2]) { const [x, y] = W(14, s); const j = (Math.random() - .5) * .6 + s * .04; puff(x, y, ship.vx * .2 + Math.cos(a + j) * (60 + Math.random() * 50), ship.vy * .2 + Math.sin(a + j) * (60 + Math.random() * 50)); } }
+let pcv = null;
+function drawShipPrev() { const c = $('shipPrev'); if (!c) return; const d = Math.min(2, window.devicePixelRatio || 1); if (c.width !== 132 * d) { c.width = 132 * d; c.height = 56 * d; } const old = ctx; ctx = c.getContext('2d'); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, c.width, c.height);
+  const rd = save.set.ship === 'roadster', k = 2.6 * d, x = 70 * d, y = 28 * d;
+  if (rd) for (let i = 0; i < 9; i++) { const ph = (animT * 1.4 + i / 9) % 1; for (const s of [-2.2, 2.2]) { const r = (1.5 + ph * 7) * k * .6; ctx.fillStyle = `rgba(255,255,255,${.5 * (1 - ph)})`; ctx.beginPath(); ctx.arc(x - (12 + ph * 16) * k, y + (s + s * ph * .8) * k, r, 0, 7); ctx.fill(); } }
+  drawHull(x, y, 0, 1, 0, null, false, k, save.set.ship); ctx = old; }
 function drawGhost() {
   if (!ghost || ghost.length < 2) return; ctx.strokeStyle = 'rgba(203,213,225,.22)'; ctx.lineWidth = 1.5; ctx.setLineDash([2, 5]); ctx.beginPath();
   ghost.forEach((p, i) => { if (i === 0 || p[2]) ctx.moveTo(X(p[0]), Y(p[1])); else ctx.lineTo(X(p[0]), Y(p[1])); }); ctx.stroke(); ctx.setLineDash([]);
@@ -712,7 +751,8 @@ function drawBeam(v) {
 }
 function drawFX(dt) {
   ctx.globalCompositeOperation = 'lighter';
-  for (let i = parts.length - 1; i >= 0; i--) { const p = parts[i]; p.l -= dt; if (p.l <= 0) { parts.splice(i, 1); continue; } p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= .97; p.vy *= .97; ctx.globalAlpha = Math.min(1, p.l * 2); ctx.fillStyle = p.c; ctx.beginPath(); ctx.arc(X(p.x), Y(p.y), R(p.r), 0, 7); ctx.fill(); }
+  for (let i = parts.length - 1; i >= 0; i--) { const p = parts[i]; p.l -= dt; if (p.l <= 0) { parts.splice(i, 1); continue; } p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= .97; p.vy *= .97; if (p.puff) { const f = 1 - p.l / p.l0, rr = R(p.r * (1 + f * 5)); const g = ctx.createRadialGradient(X(p.x), Y(p.y), 0, X(p.x), Y(p.y), rr); g.addColorStop(0, `rgba(255,255,255,${.55 * (1 - f)})`); g.addColorStop(1, 'rgba(226,232,240,0)'); ctx.globalAlpha = 1; ctx.fillStyle = g; ctx.beginPath(); ctx.arc(X(p.x), Y(p.y), rr, 0, 7); ctx.fill(); continue; }
+    ctx.globalAlpha = Math.min(1, p.l * 2); ctx.fillStyle = p.c; ctx.beginPath(); ctx.arc(X(p.x), Y(p.y), R(p.r), 0, 7); ctx.fill(); }
   ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
   for (let i = pops.length - 1; i >= 0; i--) { const p = pops[i]; p.t += dt; if (p.t > 1) { pops.splice(i, 1); continue; } ctx.globalAlpha = 1 - p.t; ctx.strokeStyle = '#fde047'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(X(p.x), Y(p.y), R(8 + p.t * 46), 0, 7); ctx.stroke(); ctx.fillStyle = '#fde047'; ctx.font = `bold ${R(16)}px sans-serif`; ctx.textAlign = 'center'; ctx.fillText('+250 ★', X(p.x), Y(p.y - 14 - p.t * 36)); ctx.textAlign = 'left'; }
   ctx.globalAlpha = 1;
@@ -738,13 +778,13 @@ function holeK() { // close-pass factor for camera zoom, proximity for audio
 }
 let last = performance.now(), acc = 0, frozen = false;
 function frame(now) {
-  const dt = Math.min(0.05, (now - last) / 1000); last = now; animT += dt;
+  const dt = Math.min(0.05, (now - last) / 1000); last = now; animT += dt; if (save.set.ship === 'roadster' && $('settings').classList.contains('on')) drawShipPrev();
   if (L && state === 'fly') {
     if (press && !braking && L.stops && ship.fuel > 0 && now - press.t >= HOLD_MS) { braking = true; hud(); }
     let sdt = dt; if (slowT > 0) { slowT -= dt; sdt = dt * 0.35; }
     acc += sdt; while (acc >= S.STEP && state === 'fly' && !frozen) { tick(); acc -= S.STEP; }
     thrust = Math.max(0, thrust - dt); heartbeat(dt);
-    if (!braking) { const spd = Math.hypot(ship.vx, ship.vy), n = (qLevel === 0 ? 1 : 2) * (0.4 + spd / 400); const ba = Math.atan2(-ship.vy, -ship.vx);
+    if (save.set.ship === 'roadster') roadsterJets(); else if (!braking) { const spd = Math.hypot(ship.vx, ship.vy), n = (qLevel === 0 ? 1 : 2) * (0.4 + spd / 400); const ba = Math.atan2(-ship.vy, -ship.vx);
       for (let q = 0; q < n; q++) if (Math.random() < 0.75) spark(ship.x - Math.cos(ba) * -6, ship.y - Math.sin(ba) * -6, ['rgba(56,189,248,.85)', 'rgba(167,139,250,.8)', 'rgba(255,255,255,.8)'][Math.floor(Math.random() * 3)], 20 + Math.random() * 40, ba + (Math.random() - .5) * .5); }
     hud();
   } else acc = 0;
@@ -810,7 +850,7 @@ function buildSectors() {
     const d = document.createElement('div'); const open = CAT.sectorOpen(save, i); d.className = 'sector' + (open ? '' : ' lock') + (s.soon ? ' soon' : ''); d.style.borderColor = s.c;
     const st = s.soon ? '' : `<div style="margin-top:4px;color:#fde047;font-size:13px">★ ${secStars(i)}/${s.ids.length * 3}</div>`;
     d.innerHTML = `<b>${open ? '' : s.soon ? '⏳ ' : '🔒 '}${i + 1}. ${I18N.secName(s)}${s.soon ? ` <span class="badge">${T('sec.soon')}</span>` : ''}</b><small>${I18N.secDesc(s)}</small>${st}${open || s.soon ? '' : `<small class="lk">${CAT.lockText(s)}</small>`}`;
-    d.onclick = () => { if (open) { curSector = i; buildLevels(); show('levels'); } else toast(s.soon ? T('sec.soonToast') : '🔒 ' + CAT.lockText(s), 1300); }; $('secList').appendChild(d);
+    d.onclick = () => { if (open) { curSector = i; buildLevels(); show('levels'); AU.theme(secTheme(i)); } else toast(s.soon ? T('sec.soonToast') : '🔒 ' + CAT.lockText(s), 1300); }; $('secList').appendChild(d);
   }
   $('secPager').style.display = pages > 1 ? 'flex' : 'none'; $('sPage').textContent = `${secPage + 1} / ${pages}`;
   $('sDots').innerHTML = pages <= 12 ? Array.from({ length: pages }, (_, k) => `<i class="${k === secPage ? 'on' : ''}" data-p="${k}"></i>`).join('') : '';
@@ -826,13 +866,14 @@ function buildLevels() {
     b.onclick = () => { if (!lock) startLevel(i); }; $('grid').appendChild(b);
   }
 }
-function toMenu() { resetInput(); ensureBG(5); state = 'menu'; L = null; ship = null; camWY = 0; Z = 1; camCX = 180; camCY = 320; AU.aimEnd(); persist();
+const secTheme = si => { const s = SECTORS[si] || SECTORS[0]; return AU.THEMES[s.id] ? s.id : AU.THEME_IDS[s.pal % 5]; };
+function toMenu() { resetInput(); ensureBG(5); state = 'menu'; AU.theme('menu'); L = null; ship = null; camWY = 0; Z = 1; camCX = 180; camCY = 320; AU.aimEnd(); persist();
   const stn = PR.stars(save), rk = PR.rank(stn);
   $('rank').innerHTML = `<b>${rk.name}</b><div class="bar"><i style="width:${rk.nextAt ? Math.round((stn - rk.at) / (rk.nextAt - rk.at) * 100) : 100}%"></i></div><span>${rk.next ? T('rank.next', { r: rk.next, n: rk.nextAt - stn }) : T('rank.top')}</span>`;
   $('score').textContent = T('menu.score', { s: I18N.num(PR.score(save)), a: Object.keys(save.achv).length, b: PR.ACH.length }); $('hud').style.display = 'none'; $('hint').style.display = 'none'; $('hand').style.display = 'none'; $('pu').style.display = 'none';
   $('totalStars').textContent = T('menu.stars', { s: totalStars(), m: CAT.maxStars, o: LEVELS.filter((_, i) => isOpen(i)).length, n: LEVELS.length });
   $('puInfo').textContent = T('menu.pu', { list: `🚀${save.pu.extra} 📡${save.pu.scan} 🛡${save.pu.shield} ⏳${save.pu.slow}`, n: save.streak % 4 }); show('menu'); }
-function syncSettings() { $('tVib').classList.toggle('on', save.set.vib); $('tSnd').classList.toggle('on', save.set.snd); $('rSfx').value = save.set.sfx; $('rMus').value = save.set.mus;
+function syncSettings() { $('tVib').classList.toggle('on', save.set.vib); $('tSnd').classList.toggle('on', save.set.snd); $('rSfx').value = save.set.sfx; $('rMus').value = save.set.mus; syncMus(); document.querySelectorAll('#shipSeg button').forEach(b => b.classList.toggle('on', b.dataset.s === save.set.ship)); drawShipPrev();
   document.querySelectorAll('#qSeg button').forEach(b => b.classList.toggle('on', b.dataset.q === save.set.q));
   document.querySelectorAll('#factSeg button').forEach(b => b.classList.toggle('on', b.dataset.f === save.set.facts)); applyLang();
   $('qInfo').textContent = T('q.now', { q: QN[qLevel], r: T(useGL ? 'q.gl' : 'q.cv') }); AU.configure(save.set); }
@@ -880,16 +921,20 @@ $('bSettings').onclick = () => { syncSettings(); show('settings'); };
 $('tVib').onclick = () => { save.set.vib = !save.set.vib; persist(); syncSettings(); HAP.tick(); };
 $('tSnd').onclick = () => { save.set.snd = !save.set.snd; persist(); syncSettings(); };
 $('rSfx').oninput = e => { save.set.sfx = +e.target.value; persist(); AU.configure(save.set); }; $('rSfx').onchange = () => AU.star(2);
-$('rMus').oninput = e => { save.set.mus = +e.target.value; persist(); AU.configure(save.set); };
+$('rMus').oninput = e => { save.set.mus = +e.target.value; if (save.set.mus > 0) save.set.musOn = true; persist(); AU.configure(save.set); syncMus(); };
+function syncMus() { const on = save.set.musOn !== false; $('tMus').classList.toggle('on', on); $('bMus').classList.toggle('off', !on); $('bMus').textContent = on ? '🎵' : '🔇'; $('bMus').title = T(on ? 'mus.on' : 'mus.off'); }
+function toggleMus() { save.set.musOn = save.set.musOn === false; persist(); AU.unlock(); AU.configure(save.set); syncMus(); toast(T(save.set.musOn ? 'mus.on' : 'mus.off'), 900); }
+$('tMus').onclick = toggleMus; $('bMus').onclick = e => { e.stopPropagation(); toggleMus(); };
+document.querySelectorAll('#shipSeg button').forEach(b => b.onclick = () => { save.set.ship = b.dataset.s; persist(); syncSettings(); });
 $('bSetBack').onclick = toMenu; $('bBack1').onclick = toMenu; $('bBack2').onclick = () => { buildSectors(); show('sectors'); };
 $('bRestart').onclick = () => { if (started) { ghost = attempt.slice(); ghostLevel = li; } startLevel(li, true); }; $('bMenu').onclick = toMenu; $('bHintPath').onclick = e => { e.stopPropagation(); useHintPath(); };
 $('bNext').onclick = () => startLevel(li + 1); $('bRetry').onclick = () => startLevel(li); $('bRetry2').onclick = e => { e.stopPropagation(); arRestart(); };
 $('fail').onclick = e => { if (e.target.closest('#bLv2,#bFailMenu')) return; arRestart(); }; // tap anywhere = restart now
 $('bFailMenu').onclick = () => { failTok++; toMenu(); };
-$('bLv').onclick = $('bLv2').onclick = () => { failTok++; curSector = CAT.secOf[li]; buildLevels(); show('levels'); };
+$('bLv').onclick = $('bLv2').onclick = () => { failTok++; curSector = CAT.secOf[li]; buildLevels(); show('levels'); AU.theme(secTheme(curSector)); };
 AU.configure(save.set); applyLang(); toMenu();
 window.BH = { LEVELS, startLevel, launch: (a, p) => launch(a, p), get state() { return state; }, get ship() { return ship; }, get clock() { return clock; }, toMenu, save, persist,
   advance(n, brake, tg) { braking = !!brake && ship.fuel > 0; for (let i = 0; i < n && state === 'fly'; i++) { if (tg != null && i === tg) ship.flip = -ship.flip; tick(); } braking = false; },
   runPlanStep(st) { launch(st.a, st.p); for (let i = 0; i < 2600 && state === 'fly'; i++) { if (st.tg != null && i === st.tg) ship.flip = -ship.flip; braking = st.b != null && i >= st.b && ship.fuel > 0; tick(); } braking = false; },
-  show, buildSectors, syncSettings, buildAch, buildStats, achCheck, get gl() { return useGL; }, get quality() { return qLevel; }, get zoom() { return Z; }, CAT, levelId: LID, unlockAll() { LEVELS.forEach((_, i) => save.open[LID(i)] = 1); persist(); }, get braking() { return braking; }, get pressing() { return !!press; }, toScreen(x, y) { return [X(x), Y(y)]; }, stepN(n) { for (let i = 0; i < n && state === 'fly'; i++) tick(); }, freeze(b) { frozen = !!b; }, forceWin() { if (state === 'aim' || state === 'fly') { clock = clock || 2.5; win(); } }, buildCodex, get facts() { return save.facts; }, get trapT() { return trapT; }, get trapHint() { return trapHint; }, get failTok() { return failTok; }, get hintPath() { return hintPath; }, get skin() { return L && L.skin; }, useHintPath, solverPath, setShip(x, y, vx, vy) { ship.x = x; ship.y = y; ship.vx = vx; ship.vy = vy; } };
+  show, buildSectors, syncSettings, buildAch, buildStats, achCheck, get gl() { return useGL; }, get quality() { return qLevel; }, get zoom() { return Z; }, CAT, levelId: LID, unlockAll() { LEVELS.forEach((_, i) => save.open[LID(i)] = 1); persist(); }, get braking() { return braking; }, get pressing() { return !!press; }, toScreen(x, y) { return [X(x), Y(y)]; }, stepN(n) { for (let i = 0; i < n && state === 'fly'; i++) tick(); }, freeze(b) { frozen = !!b; }, forceWin() { if (state === 'aim' || state === 'fly') { clock = clock || 2.5; win(); } }, buildCodex, get facts() { return save.facts; }, get trapT() { return trapT; }, get trapHint() { return trapHint; }, get failTok() { return failTok; }, get hintPath() { return hintPath; }, get skin() { return L && L.skin; }, setBraking: v => { braking = !!v; }, get parts() { return parts; }, toggleMus, drawShipPrev, useHintPath, solverPath, setShip(x, y, vx, vy) { ship.x = x; ship.y = y; ship.vx = vx; ship.vy = vy; } };
 })();

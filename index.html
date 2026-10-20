@@ -153,15 +153,17 @@ input[type=range]::-moz-range-thumb{width:20px;height:20px;border-radius:50%;bac
 .btn.hp{background:linear-gradient(135deg,#f59e0b,#fde047);color:#1c1917;box-shadow:0 0 18px rgba(253,224,71,.8);animation:hpb 1.4s ease-in-out infinite}
 @keyframes hpb{50%{box-shadow:0 0 30px rgba(253,224,71,1);transform:scale(1.08)}}
 #fHint{margin:-4px 0 10px;color:#fde68a;min-height:0}#fHint:empty{display:none}#fHint.new{font-weight:800;text-shadow:0 0 10px rgba(253,224,71,.7)}
+#bMus.qmus{position:absolute;top:max(14px,env(safe-area-inset-top));right:14px;width:44px;height:44px;border-radius:50%;border:1px solid rgba(255,255,255,.18);background:rgba(15,23,42,.55);color:#fff;font-size:20px;line-height:1;padding:0;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}#bMus.off{opacity:.6;background:rgba(15,23,42,.35)}
+.shipbox{display:flex;align-items:center;gap:8px;flex-wrap:wrap}#shipPrev{width:132px;height:56px;border-radius:10px;background:radial-gradient(ellipse at center,rgba(30,41,59,.9),rgba(2,6,23,.9));border:1px solid rgba(255,255,255,.1)}
 </style></head><body>
 <canvas id="gl"></canvas><canvas id="c"></canvas>
 <div id="ui">
- <div id="menu" class="scr on" style="justify-content:flex-end;padding-bottom:max(34px,6vh)"><h1>BLACKHOLE<br>BATTLE</h1><div class="sub" data-i="menu.sub">гравітаційна головоломка</div>
+ <div id="menu" class="scr on" style="justify-content:flex-end;padding-bottom:max(34px,6vh)"><button id="bMus" class="qmus" aria-label="music">🎵</button><h1>BLACKHOLE<br>BATTLE</h1><div class="sub" data-i="menu.sub">гравітаційна головоломка</div>
   <button class="btn" id="bPlay" data-i="menu.play">Грати</button><button class="btn g" id="bSectors" data-i="menu.sectors">Сектори</button>
   <div class="row2" style="width:min(320px,94%)"><button class="btn g" id="bAch" data-i="menu.ach">🏆 Досягнення</button><button class="btn g" id="bStats" data-i="menu.stats">📊 Статистика</button></div>
   <div class="row2" style="width:min(320px,94%)"><button class="btn g" id="bCodex" data-i="menu.codex">📖 Кодекс</button><button class="btn g" id="bSettings" data-i="menu.settings">⚙ Налаштування</button></div>
   <div id="rank"></div><div class="small" id="score" style="margin-top:4px"></div>
-  <div class="small" id="totalStars" style="margin-top:6px"></div><div class="small" id="puInfo" style="margin-top:4px"></div><div class="ver">v3.1.4</div></div>
+  <div class="small" id="totalStars" style="margin-top:6px"></div><div class="small" id="puInfo" style="margin-top:4px"></div><div class="ver">v3.1.5</div></div>
  <div id="achs" class="scr dim"><h2><span data-i="ach.title">Досягнення</span> <span class="small" id="achCount"></span></h2><div class="list" id="achList"></div><button class="btn g s" id="bAchBack" data-i="back">← Назад</button></div>
  <div id="codex" class="scr dim"><h2><span data-i="codex.title">Кодекс</span> <span class="small" id="cxCount"></span></h2><div class="list" id="cxList"></div><button class="btn g s" id="bCxBack" data-i="back">← Назад</button></div>
  <div id="factCard" class="scr dim"><div class="panel fact" id="fcPanel"><div class="flab" id="fcLab"></div><h2 id="fcTitle"></h2><p id="fcText"></p><div class="fstar" id="fcStar"></div><div class="fsrc" id="fcSrc"></div><div class="small ftap" data-i="fact.tap">Торкнись, щоб продовжити</div></div></div>
@@ -174,8 +176,10 @@ input[type=range]::-moz-range-thumb{width:20px;height:20px;border-radius:50%;bac
   <div class="set"><span data-i="set.vib">📳 Вібрація</span><button class="tg" id="tVib"></button></div>
   <div class="set"><span data-i="set.snd">🔊 Звук</span><button class="tg" id="tSnd"></button></div>
   <div class="set"><span data-i="set.sfx">Гучність ефектів</span><input type="range" id="rSfx" min="0" max="100"/></div>
+  <div class="set"><span data-i="set.musOn">🎵 Музика</span><button class="tg" id="tMus"></button></div>
   <div class="set"><span data-i="set.mus">Гучність музики</span><input type="range" id="rMus" min="0" max="100"/></div>
   <div class="set wrap"><span data-i="set.gfx">✨ Графіка</span><div class="seg" id="qSeg"><button data-q="auto" data-i="set.q.auto">Авто</button><button data-q="low" data-i="set.q.low">Низька</button><button data-q="high" data-i="set.q.high">Висока</button></div></div>
+ <div class="set wrap"><span data-i="set.ship">🚀 Корабель</span><div class="shipbox"><canvas id="shipPrev" width="132" height="56"></canvas><div class="seg" id="shipSeg"><button data-s="shuttle" data-i="ship.shuttle">Шатл</button><button data-s="roadster" data-i="ship.roadster">Родстер</button></div></div></div>
  <div class="set wrap"><span data-i="set.lang">🌐 Мова</span><div class="seg" id="langSeg"><button data-l="uk">Українська</button><button data-l="en">English</button><button data-l="es">Español</button></div></div>
  <div class="set wrap"><span data-i="set.facts">📖 Факти</span><div class="seg" id="factSeg"><button data-f="always" data-i="set.facts.always">Завжди</button><button data-f="win" data-i="set.facts.win">Після перемоги</button><button data-f="codex" data-i="set.facts.codex">Лише в Кодексі</button></div></div>
   <div class="small" id="qInfo" style="margin:10px 0"></div><div class="small" style="margin:0 0 10px;opacity:.7" data-i="set.synth">Уся музика й звуки синтезуються в реальному часі.</div>
