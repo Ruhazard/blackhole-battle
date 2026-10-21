@@ -1,4 +1,4 @@
-/* Blackhole Battle v3.2.1 — stage 2: visuals, sound, progress (gameplay/physics unchanged from v3.0) */
+/* Blackhole Battle v3.3.0 — stage 2: visuals, sound, progress (gameplay/physics unchanged from v3.0) */
 (() => {
 'use strict';
 const S = window.BHSim;
@@ -15,7 +15,7 @@ const NOOP = () => {}; const AU = window.BHAudio || { unlock: NOOP, configure: N
 const PR = window.BHProg;
 let W, H, DPR, SC, OX, OY, camWY = 0, Z = 1, camCX = 180, camCY = 320, QS = 1, BGS = 1, qLevel = 1, autoQ = 1, autoUp = 0, fpsT = 0, fpsN = 0;
 const X = x => OX + (180 + (x - camCX) * Z) * SC, Y = y => OY + (320 + (y - camCY) * Z) * SC, R = v => v * SC * Z;
-const SHIPS = window.BHShips; let shipFX = { bank: 0, pa: null, sqT: 9, wheel: 0, death: null, win: null }; // v3.2.0 visual-only ship state
+const SHIPS = window.BHShips; let shipFX = { bank: 0, pa: null, sqT: 9, wheel: 0, death: null, win: null, spinA: 0, spinV: 0 }; // v3.2.0 visual-only ship state
 const glowCache = new Map(); let lenses = [], planetCache = {}, fl = { bounces: 0, margin: 1e9 }, cpK = 0, proxK = 0;
 const QN = { get 0() { return T('q.0'); }, get 1() { return T('q.1'); }, get 2() { return T('q.2'); } };
 function rng(seed) { let s = seed >>> 0 || 1; return () => (s = (s * 1664525 + 1013904223) >>> 0) / 4294967296; }
@@ -152,8 +152,8 @@ function startLevel(i, keepGhost) {
   if (!keepGhost || ghostLevel !== i) { ghost = null; }
   hintPath = null; li = i; ensureBG(SECTORS[CAT.secOf[i]].pal); AU.theme(secTheme(CAT.secOf[i])); L = S.prep(LEVELS[i]); L.skin = resolveSkins(LID(i), L); ship = S.newShip(L); ship.ang = -Math.PI / 2;
   launchesLeft = L.L; collected = new Set(); clock = 0; started = false; resetInput();
-  shipFX.death = null; shipFX.win = null; shipFX.sqT = 9; shipFX.bank = 0; shipFX.pa = null; smokeSprite(); // prewarm (no canvas creation on the first launch)
-  trail = []; attempt = []; parts = []; pops = []; edgeRipples = []; aim = null; preview = []; tf = 1; active = {}; scanArmed = false; shieldOn = false; slowT = 0;
+  shipFX.death = null; shipFX.win = null; shipFX.sqT = 9; shipFX.bank = 0; shipFX.pa = null; shipFX.spinA = 0; shipFX.spinV = 0; smokeSprite(); // prewarm (no canvas creation on the first launch)
+  trail = []; attempt = []; pclear(); pops = []; edgeRipples = []; aim = null; preview = []; tf = 1; active = {}; scanArmed = false; shieldOn = false; slowT = 0;
   planetCache = {}; camWY = clampCam(ship.y); Z = 1; camCX = 180; camCY = camWY + 320; fl = { bounces: 0, margin: 1e9 }; AU.aimEnd(); state = 'aim'; show(null); $('hud').style.display = 'flex'; hudSet('hTime', 'text', '0.0');
   $('hLevel').textContent = `${i + 1}. ${lvName(i)}`; $('hTarget').textContent = L.t3 ? `3★ ≤ ${L.t3}${T('hud.sec')}` : '';
   $('chipFuel').style.display = L.stops ? '' : 'none'; syncHintBtn();
@@ -272,7 +272,40 @@ function computePreview(a, p) {
 }
 
 // ---------- effects ----------
-function spark(x, y, col, sp, ang) { if (parts.length > 420) parts.splice(0, parts.length - 420); const a = ang ?? Math.random() * 6.28, s = sp ?? 40 + Math.random() * 120; parts.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, l: 0.5 + Math.random() * 0.5, c: col, r: 1 + Math.random() * 2 }); }
+// v3.3.0: pooled particles — fixed cap, recycled objects, swap-remove (no splice / no per-spark allocation once warm)
+const PCAP = 420, pfree = []; let pRing = 0;
+function pnew(x, y, vx, vy, l, r, c) { const p = pfree.pop() || {}; p.x = x; p.y = y; p.vx = vx; p.vy = vy; p.l = l; p.l0 = l; p.r = r; p.c = c; p.c2 = ''; p.smoke = p.puff = p.ice = p.deb = p.streak = p.ring = p.flash = 0; p.ph = 0; p.rot = 0; p.vr = 0;
+  if (parts.length >= PCAP) { pRing = (pRing + 1) % PCAP; if (pfree.length < 600) pfree.push(parts[pRing]); parts[pRing] = p; } else parts.push(p); return p; }
+function pclear() { for (const p of parts) if (pfree.length < 600) pfree.push(p); parts.length = 0; }
+const qMul = () => [.5, .8, 1][qLevel] || 1;
+function spark(x, y, col, sp, ang) { const a = ang ?? Math.random() * 6.28, s = sp ?? 40 + Math.random() * 120; pnew(x, y, Math.cos(a) * s, Math.sin(a) * s, 0.5 + Math.random() * 0.5, 1 + Math.random() * 2, col); }
+function streak(x, y, vx, vy, col, l) { pnew(x, y, vx, vy, l || .25 + Math.random() * .3, .9 + Math.random() * .8, col).streak = 1; }
+function shard(x, y, vx, vy, c, c2, r, l) { const p = pnew(x, y, vx, vy, l || .7 + Math.random() * .6, r, c); p.deb = 1; p.c2 = c2; p.rot = Math.random() * 6.28; p.vr = (Math.random() - .5) * 22; p.ph = Math.random(); }
+function shockwave(x, y, r0, r1, col, l) { const p = pnew(x, y, 0, 0, l || .45, r1, col); p.ring = 1; p.ph = r0; }
+function flash(x, y, r, col, l) { const p = pnew(x, y, 0, 0, l || .22, r, col); p.flash = 1; }
+// impact response FX, scaled by the normal speed of the hit (world units/s). Sparks skid along the surface in the slide direction.
+const HIT_PAL = { metal: ['#e2e8f0', '#475569', '#fde68a'], ice: ['#e0f2fe', '#0e7490', '#bae6fd'], rock: ['#d6d3d1', '#44403c', '#fbbf24'], planet: ['#cbd5e1', '#334155', '#fdba74'] };
+function impactFX(h) {
+  const k = Math.min(1, h.vn / 260), q = qMul(), ask = h.i != null ? skinOf('asteroids', h.i) : null;
+  const pal = HIT_PAL[h.kind === 'metal' || ask === 'metal' ? 'metal' : ask === 'ice' ? 'ice' : h.kind === 'planet' ? 'planet' : 'rock'];
+  const tx = -h.ny, ty = h.nx, sd = Math.sign(h.vt) || 1, ns = Math.round((5 + 16 * k) * q);
+  for (let i = 0; i < ns; i++) { const al = (Math.random() * 1.5 - .25) * sd, out = .15 + Math.random() * .8, dx = tx * al + h.nx * out, dy = ty * al + h.ny * out, m = Math.hypot(dx, dy) || 1, v = 70 + Math.random() * 260 * (.35 + k);
+    streak(h.x, h.y, dx / m * v, dy / m * v, Math.random() < .5 ? pal[2] : '#fff7ed'); }
+  const nd = Math.round((1 + 7 * k) * q); for (let i = 0; i < nd; i++) { const a = Math.atan2(h.ny, h.nx) + (Math.random() - .5) * 2.2, v = 40 + Math.random() * 120 * (.4 + k); shard(h.x, h.y, Math.cos(a) * v, Math.sin(a) * v, pal[0], pal[1], .9 + Math.random() * 1.6 * (.5 + k)); }
+  if (h.kind !== 'metal' && k > .15) for (let i = 0; i < 2; i++) smoke(h.x + h.nx * 3, h.y + h.ny * 3, h.nx * 25 + (Math.random() - .5) * 20, h.ny * 25 + (Math.random() - .5) * 20, 2 + 2 * k);
+  if (k > .3) { flash(h.x, h.y, 14 + 26 * k, '255,237,213'); shockwave(h.x, h.y, 4, 22 + 30 * k, '254,215,170', .35); }
+  shake = Math.min(9, shake + 1.5 + h.vn / 70);
+  shipFX.spinV += sd * Math.min(14, Math.abs(h.spin) / 10 + k * 3); if (k > .25) shipFX.sqT = 0; // visual: the hull is knocked into a spin and squashes
+}
+// ship break-up (non-hole deaths): light flash, two shockwaves, hull debris, fire streaks and smoke
+function explodeFX(x, y, vx, vy, kind) {
+  const q = qMul(), hull = kind === 'roadster' ? [['#dc2626', '#7f1d1d'], ['#e5e7eb', '#4b5563'], ['#111827', '#000']] : [['#f8fafc', '#94a3b8'], ['#1f2937', '#030712'], ['#cbd5e1', '#475569']];
+  flash(x, y, 70, '255,237,213', .32); flash(x, y, 34, '255,255,255', .14); shockwave(x, y, 6, 70, '254,215,170', .55); shockwave(x, y, 4, 40, '255,255,255', .3);
+  for (let i = 0; i < Math.round(18 * q) + 4; i++) { const a = Math.random() * 6.28, v = 40 + Math.random() * 170, c = hull[i % 3]; shard(x, y, Math.cos(a) * v + vx * .3, Math.sin(a) * v + vy * .3, c[0], c[1], 1.4 + Math.random() * 2.6, .9 + Math.random() * .8); }
+  for (let i = 0; i < Math.round(26 * q); i++) { const a = Math.random() * 6.28, v = 90 + Math.random() * 300; streak(x, y, Math.cos(a) * v + vx * .2, Math.sin(a) * v + vy * .2, ['#fde68a', '#fb923c', '#fff7ed'][i % 3], .3 + Math.random() * .35); }
+  for (let i = 0; i < Math.round(10 * q); i++) { const a = Math.random() * 6.28, v = 15 + Math.random() * 45; smoke(x, y, Math.cos(a) * v, Math.sin(a) * v, 3 + Math.random() * 3); }
+  burst(x, y, '#f97316', Math.round(12 * q));
+}
 function burst(x, y, col, n) { for (let i = 0; i < n; i++) spark(x, y, col); }
 
 // ---------- tick ----------
@@ -282,8 +315,12 @@ function tick() {
   tf = ev.tf;
   const stt = save.stats; stt.flight += S.STEP; if (tf < 0.6) stt.dilate += S.STEP;
   for (const h of L.holes) { const [hx, hy] = S.holePos(h, ship.t); const m = (Math.hypot(ship.x - hx, ship.y - hy) - h.r * S.KILL) / h.r; if (m < fl.margin) fl.margin = m; }
-  if (ev.bounce) { shake = Math.min(12, shake + 6); burst(ship.x, ship.y, '#fbbf24', 8); HAP.bounce(); AU.bounce(); fl.bounces++; stt.bounces++; }
-  if (ev.broke >= 0) { const a = L.asteroids[ev.broke]; for (let k = 0; k < 30; k++) spark(a[0] + (Math.random() - .5) * a[2], a[1], '#a8a29e'); shake = 14; toast(T('ev.broke'), 900); AU.crash(); stt.breaks++; achCheck(); }
+  if (ev.bounce) { if (ev.hit) impactFX(ev.hit); else { shake = Math.min(9, shake + 4); burst(ship.x, ship.y, '#fbbf24', 8); } HAP.bounce(); AU.bounce(); fl.bounces++; stt.bounces++; }
+  if (ev.broke >= 0) { const a = L.asteroids[ev.broke], ca = Math.cos(a[4]), sa = Math.sin(a[4]), q = qMul(); // v3.3.0: the cracked slab shatters into lit rock shards + dust
+    for (let k = 0; k < Math.round(26 * q) + 6; k++) { const u = (Math.random() - .5) * a[2], w = (Math.random() - .5) * a[3], px = a[0] + ca * u - sa * w, py = a[1] + sa * u + ca * w, an = Math.random() * 6.28, v = 30 + Math.random() * 130;
+      shard(px, py, Math.cos(an) * v + ship.vx * .25, Math.sin(an) * v + ship.vy * .25, '#d6d3d1', '#44403c', 1.2 + Math.random() * 2.8, .9 + Math.random() * .7); }
+    for (let k = 0; k < Math.round(8 * q); k++) smoke(a[0] + ca * (Math.random() - .5) * a[2], a[1] + sa * (Math.random() - .5) * a[2], (Math.random() - .5) * 40, (Math.random() - .5) * 40, 3 + Math.random() * 3);
+    flash(ship.x, ship.y, 40, '255,237,213'); shockwave(ship.x, ship.y, 6, 50, '214,211,209', .45); shake = Math.min(10, shake + 7); toast(T('ev.broke'), 900); AU.crash(); stt.breaks++; achCheck(); }
   if (ev.key >= 0) { burst(L.keys[ev.key][0], L.keys[ev.key][1], '#fde047', 30); HAP.key(); AU.key(); toast(T('ev.gate'), 1000); }
   if (ev.worm) { burst(ship.x, ship.y, '#34d399', 24); shake = 6; trail = []; AU.worm(); stt.worms++; achCheck(); }
   const lt = trail[trail.length - 1];
@@ -414,7 +451,7 @@ function fail(msg, why) {
   if (why === 'oob') edgeRipples.push({ x: ship.x, y: ship.y, t: 0, big: 1 });
   { let hx = null, hy = null, bd = 1e9; if (why === 'swallowed') for (const h of L.holes) { const [qx, qy] = S.holePos(h, ship.t), d = Math.hypot(qx - ship.x, qy - ship.y); if (d < bd) { bd = d; hx = qx; hy = qy; } }
     shipFX.death = { t: 0, x: ship.x, y: ship.y, ang: ship.ang || 0, hx, hy, vx: ship.vx, vy: ship.vy, kind: save.set.ship }; }
-  resetInput(); state = 'fail'; burst(ship.x, ship.y, why === 'swallowed' ? '#a78bfa' : '#ef4444', why === 'swallowed' ? 18 : 40); shake = 14; HAP.death(); AU.lose();
+  resetInput(); state = 'fail'; if (why === 'swallowed') { burst(ship.x, ship.y, '#a78bfa', 18); shake = 8; } else { explodeFX(ship.x, ship.y, ship.vx, ship.vy, save.set.ship); shake = 10; } HAP.death(); AU.lose();
   save.stats.fails++; save.stats.deaths[why || 'other'] = (save.stats.deaths[why || 'other'] || 0) + 1; achCheck({ type: 'fail' }); persist(); $('hud').style.display = 'none'; $('hint').style.display = 'none';
   ghost = attempt.slice(); ghostLevel = li;
   { const id = LID(li); save.lfail[id] = (save.lfail[id] || 0) + 1; let earned = false; if (save.lfail[id] >= HINT_EVERY && !save.hintOk[id] && LEVELS[li].sol) { save.hintOk[id] = 1; earned = true; } persist();
@@ -444,7 +481,8 @@ function diskStroke(x, y, r, t, from, to, a) {
 function drawHoleScene(h, t) {
   const [hx, hy] = S.holePos(h, t); const mk = S.holeMass(h, t) / h.m; const x = X(hx), y = Y(hy), r = R(h.r) * (0.85 + 0.15 * mk);
   if (useGL) lenses.push({ x, y, r, s: 0.8 + 0.2 * mk });
-  else {
+  { const rs = Math.round(h.r * SC * AST_ZMAX * 4) / 4, ws = wellSprite(rs), f = r / rs; ctx.drawImage(ws.c, x - (ws.R0 + .5) * f, y - (ws.R0 + .5) * f, ws.c.width / DPR * f, ws.c.height / DPR * f); } // v3.3.0 gravity well
+  if (!useGL) {
     ctx.save(); ctx.beginPath(); ctx.arc(x, y, r * 3.2, 0, 7); ctx.clip(); ctx.translate(x, y); ctx.rotate(Math.PI); ctx.scale(1.35, 1.35); ctx.translate(-x, -y); ctx.globalAlpha = 0.85; ctx.drawImage(bg, 0, 0, W, H); ctx.restore();
     const dk = ctx.createRadialGradient(x, y, r, x, y, r * 3.2); dk.addColorStop(0, 'rgba(0,0,0,.85)'); dk.addColorStop(.35, 'rgba(20,0,40,.35)'); dk.addColorStop(1, 'rgba(0,0,0,0)'); ctx.fillStyle = dk; ctx.beginPath(); ctx.arc(x, y, r * 3.2, 0, 7); ctx.fill();
   }
@@ -492,7 +530,7 @@ function planetSprite(p, i, r) {
   const g = b.createRadialGradient(cr * .7, cr * .7, cr * .1, cr, cr, cr * 1.05); g.addColorStop(0, c1); g.addColorStop(1, c2); b.fillStyle = g; b.fillRect(0, 0, cr * 2 + 1, cr * 2 + 1);
   for (let k = 0; k < 9; k++) { const yy = rr() * cr * 2, hh = cr * (.06 + rr() * .18); b.fillStyle = `rgba(${rr() < .5 ? '255,255,255' : '0,0,20'},${.06 + rr() * .1})`; b.beginPath(); b.ellipse(cr, yy, cr * 1.3, hh, (rr() - .5) * .25, 0, 7); b.fill(); }
   for (let k = 0; k < 5; k++) { b.fillStyle = 'rgba(0,0,0,.12)'; b.beginPath(); b.arc(rr() * cr * 2, rr() * cr * 2, cr * (.05 + rr() * .1), 0, 7); b.fill(); }
-  b.restore();
+  bakeSphere(b, cr); b.restore();
   const cl = document.createElement('canvas'); cl.width = d * 2; cl.height = d; const c = cl.getContext('2d'); c.scale(DPR, DPR);
   for (let k = 0; k < 22; k++) { const x = rr() * cr * 4, y = cr * (.2 + rr() * 1.6), w = cr * (.3 + rr() * .6); const cg = c.createRadialGradient(x, y, 0, x, y, w); cg.addColorStop(0, 'rgba(255,255,255,.32)'); cg.addColorStop(1, 'rgba(255,255,255,0)'); c.fillStyle = cg; c.beginPath(); c.ellipse(x, y, w, w * .35, 0, 0, 7); c.fill(); }
   // rings are decorative only: skip them if they would overlap a gameplay object or route
@@ -521,7 +559,7 @@ function skinSprite(p, i, r, sk) {
     for (let k = 0; k < 7; k++) { b.beginPath(); let x = rr() * cr * 2, y = rr() * cr * 2; b.moveTo(x, y); for (let j = 0; j < 4; j++) { x += (rr() - .5) * cr * .7; y += (rr() - .5) * cr * .7; b.lineTo(x, y); } b.stroke(); } b.shadowBlur = 0; }
   else if (sk === 'sun') { for (let k = 0; k < 60; k++) { b.fillStyle = `rgba(${rr() < .5 ? '255,255,255' : '194,65,12'},${.08 + rr() * .1})`; b.beginPath(); b.arc(rr() * cr * 2, rr() * cr * 2, cr * (.03 + rr() * .07), 0, 7); b.fill(); }
     spots(2, 'rgba(120,53,15,.45)', .04, .05); }
-  b.restore();
+  if (sk !== 'neutron') bakeSphere(b, cr, sk === 'sun'); b.restore();
   const cl = document.createElement('canvas'); cl.width = d * 2; cl.height = d; const c = cl.getContext('2d'); c.scale(DPR, DPR);
   const nCl = sk === 'earth' ? 18 : sk === 'ice' || sk === 'gas' ? 6 : 0;
   for (let k = 0; k < nCl; k++) { const x = rr() * cr * 4, y = cr * (.2 + rr() * 1.6), w = cr * (.3 + rr() * .6); const cg = c.createRadialGradient(x, y, 0, x, y, w); cg.addColorStop(0, 'rgba(255,255,255,.32)'); cg.addColorStop(1, 'rgba(255,255,255,0)'); c.fillStyle = cg; c.beginPath(); c.ellipse(x, y, w, w * .35, 0, 0, 7); c.fill(); }
@@ -531,6 +569,47 @@ function ringArc(x, y, r, from, to) {
   ctx.save(); ctx.translate(x, y); ctx.rotate(-0.3);
   [[1.75, 2.6, 'rgba(253,230,138,.28)'], [1.55, 1.6, 'rgba(254,243,199,.4)'], [1.38, 3.2, 'rgba(214,211,209,.22)']].forEach(([k, w, c]) => { ctx.strokeStyle = c; ctx.lineWidth = R(w); ctx.beginPath(); ctx.ellipse(0, 0, r * k, r * k * .24, 0, from, to); ctx.stroke(); });
   ctx.restore();
+}
+
+// ---------- v3.3.0: tabletop volume ----------
+// One key light for the whole board (top-left, same direction as lightAt's default); every piece casts a soft contact shadow toward the bottom-right.
+// Everything here is pre-rendered once (per DPR / size) — per frame it is only drawImage + a few cheap strokes.
+const KEY_A = -2.3, SDX = -Math.cos(KEY_A), SDY = -Math.sin(KEY_A);
+let shadowSpr = null; function shadowSprite() { if (shadowSpr) return shadowSpr; const c = document.createElement('canvas'); c.width = c.height = 128; const x = c.getContext('2d'), g = x.createRadialGradient(64, 64, 0, 64, 64, 64);
+  g.addColorStop(0, 'rgba(0,0,6,.85)'); g.addColorStop(.45, 'rgba(0,0,6,.6)'); g.addColorStop(.75, 'rgba(0,0,6,.22)'); g.addColorStop(1, 'rgba(0,0,6,0)'); x.fillStyle = g; x.fillRect(0, 0, 128, 128); return shadowSpr = c; }
+// contact shadow: r = footprint radius (screen px), h = height above the board (screen px) -> offset + softness, a = opacity
+function cshadow(x, y, r, h, a) { if (!(r > 0)) return; const rr = r * 1.12 + h * .45, ga = ctx.globalAlpha; ctx.globalAlpha = ga * a; ctx.drawImage(shadowSprite(), x + SDX * h - rr, y + SDY * h - rr, rr * 2, rr * 2); ctx.globalAlpha = ga; }
+// fine surface grain (rock / ice / metal micro texture), blended with 'overlay' into baked sprites
+let noiseT = null; function noiseTile() { if (noiseT) return noiseT; const n = 96, c = document.createElement('canvas'); c.width = c.height = n; const x = c.getContext('2d'), id = x.createImageData(n, n), r = rng(4242);
+  const lo = new Float32Array(16 * 16); for (let i = 0; i < lo.length; i++) lo[i] = r();
+  for (let y = 0; y < n; y++) for (let xx = 0; xx < n; xx++) { const u = xx / n * 16, v = y / n * 16, i0 = Math.floor(u), j0 = Math.floor(v), fu = u - i0, fv = v - j0, L0 = (a, b) => lo[(b & 15) * 16 + (a & 15)];
+    const low = (L0(i0, j0) * (1 - fu) + L0(i0 + 1, j0) * fu) * (1 - fv) + (L0(i0, j0 + 1) * (1 - fu) + L0(i0 + 1, j0 + 1) * fu) * fv, v8 = Math.max(0, Math.min(255, 128 + (low - .5) * 70 + (r() - .5) * 60)), k = (y * n + xx) * 4;
+    id.data[k] = id.data[k + 1] = id.data[k + 2] = v8; id.data[k + 3] = 255; }
+  x.putImageData(id, 0, 0); return noiseT = c; }
+function grainFill(b, x, y, w, h, a) { const pc = b.globalCompositeOperation, ga = b.globalAlpha; b.globalCompositeOperation = 'overlay'; b.globalAlpha = a; b.fillStyle = b.createPattern(noiseTile(), 'repeat'); b.fillRect(x, y, w, h); b.globalCompositeOperation = pc; b.globalAlpha = ga; }
+// baked sphere volume (inside the body clip): micro texture + limb darkening (ambient occlusion toward the silhouette)
+function bakeSphere(b, cr, warm) { grainFill(b, 0, 0, cr * 2 + 1, cr * 2 + 1, warm ? .18 : .42);
+  const g = b.createRadialGradient(cr + .5, cr + .5, cr * .55, cr + .5, cr + .5, cr); g.addColorStop(0, 'rgba(0,0,10,0)'); g.addColorStop(.7, warm ? 'rgba(120,40,0,.12)' : 'rgba(0,0,10,.16)'); g.addColorStop(1, warm ? 'rgba(120,40,0,.4)' : 'rgba(0,0,10,.5)');
+  b.fillStyle = g; b.fillRect(0, 0, cr * 2 + 1, cr * 2 + 1); }
+// black-hole gravity well: a pre-rendered funnel (terraced rings lit from the key light) sunk into the board
+function wellSprite(r) { const key = 'well' + Math.round(r * 4) + '@' + DPR; if (planetCache[key]) return planetCache[key]; const R0 = r * 6.6, d = Math.ceil(R0 * 2 * DPR) + 2, c = document.createElement('canvas'); c.width = c.height = d;
+  const b = c.getContext('2d'); b.scale(DPR, DPR); b.translate(R0 + .5, R0 + .5);
+  const dg = b.createRadialGradient(0, 0, r, 0, 0, R0); dg.addColorStop(0, 'rgba(0,0,0,.55)'); dg.addColorStop(.4, 'rgba(6,2,20,.32)'); dg.addColorStop(1, 'rgba(6,2,20,0)'); b.fillStyle = dg; b.beginPath(); b.arc(0, 0, R0, 0, 7); b.fill();
+  for (let k = 0; k < 6; k++) { const q = k / 6, rk = R0 * (1 - q * .78) * .96, a = .07 + q * .16, off = q * r * .5; // deeper terraces drift away from the light
+    const g = b.createLinearGradient(-SDX * rk, -SDY * rk, SDX * rk, SDY * rk); g.addColorStop(0, `rgba(0,0,0,${a * 1.4})`); g.addColorStop(.5, `rgba(167,139,250,${a * .35})`); g.addColorStop(1, `rgba(221,214,254,${a * 1.5})`);
+    b.strokeStyle = g; b.lineWidth = Math.max(.8, r * (.16 - q * .08)); b.beginPath(); b.arc(SDX * off, SDY * off, rk, 0, 7); b.stroke(); }
+  return planetCache[key] = { c, R0 }; }
+// shading for 3D bonus stars: 10 facets lit by the key light
+const STAR_LO = [180, 110, 6], STAR_HI = [255, 250, 205];
+function facetCol(b) { b = Math.max(0, Math.min(1, b)); return `rgb(${STAR_LO.map((v, i) => Math.round(v + (STAR_HI[i] - v) * b)).join(',')})`; }
+// light direction expressed in an object's local (rotated) frame
+const localLight = rot => [Math.cos(KEY_A - rot), Math.sin(KEY_A - rot)];
+function drawShadows() { // contact shadows / ambient occlusion on the board (before any piece is drawn)
+  L.planets.forEach(p => { const r = R(p[2]), sk = skinOf('planets', L.planets.indexOf(p)); if (sk === 'sun' || sk === 'neutron') return; cshadow(X(p[0]), Y(p[1]), r, r * .22 + R(5), .7); });
+  L.moons.forEach(m => { const [mx, my] = S.moonPos(m, ship.t); cshadow(X(mx), Y(my), R(m.r), R(m.r) * .3 + R(5), .6); });
+  L.keys.forEach((k, i) => { if (!((ship.keys >> i) & 1)) cshadow(X(k[0]), Y(k[1]), R(9), R(8) - Math.sin(animT * 3) * R(2), .5); });
+  L.magnets.forEach(m => cshadow(X(m[0]), Y(m[1]), R(13), R(6), .55));
+  L.worms.forEach(w => { for (const P of [w.a, w.b]) cshadow(X(P[0]), Y(P[1]), R(w.r || 16) * .9, R(4), .45); });
 }
 function drawPlanet(p, i) {
   const x = X(p[0]), y = Y(p[1]), r = R(p[2]), rs = Math.round(p[2] * SC * 1.14 * 4) / 4, sf = r / rs; const sp = planetSprite(p, i, rs); const lt = lightAt(p[0], p[1]); // v3.1.7: sprite built once at max-zoom size (was rebuilt every frame while the camera zoomed)
@@ -547,6 +626,8 @@ function drawPlanet(p, i) {
   // atmosphere rim, brighter on the lit side
   const ag = ctx.createLinearGradient(x - Math.cos(lt.a) * r, y - Math.sin(lt.a) * r, x + Math.cos(lt.a) * r, y + Math.sin(lt.a) * r); ag.addColorStop(0, `rgba(${sp.rgb},.08)`); ag.addColorStop(1, `rgba(${sp.rgb},.85)`);
   ctx.strokeStyle = ag; ctx.lineWidth = R(2.2); ctx.beginPath(); ctx.arc(x, y, r * 1.02, 0, 7); ctx.stroke();
+  if (!sp.self) { glow(x + Math.cos(lt.a) * r * .46, y + Math.sin(lt.a) * r * .46, r * .34, 'rgba(255,255,255,A)', .2 + .12 * lt.k); // v3.3.0 specular + cool back-rim
+    ctx.strokeStyle = 'rgba(165,180,252,.32)'; ctx.lineWidth = Math.max(1, R(1.3)); ctx.beginPath(); ctx.arc(x, y, r * .97, lt.a + Math.PI - .95, lt.a + Math.PI + .95); ctx.stroke(); }
   if (sp.ring) ringArc(x, y, r, 0, Math.PI);
 }
 function neutronBeams(x, y, r, col) { const a = animT * 2.2, pc = ctx.globalCompositeOperation; ctx.globalCompositeOperation = 'lighter';
@@ -554,6 +635,10 @@ function neutronBeams(x, y, r, col) { const a = animT * 2.2, pc = ctx.globalComp
     ctx.fillStyle = g; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + Math.cos(a + s - .14) * r * 5, y + Math.sin(a + s - .14) * r * 5); ctx.lineTo(x + Math.cos(a + s + .14) * r * 5, y + Math.sin(a + s + .14) * r * 5); ctx.closePath(); ctx.fill(); }
   ctx.globalCompositeOperation = pc; }
 const MSKIN = { luna: ['#f8fafc', '#94a3b8', '#1e293b'], io: ['#fef9c3', '#eab308', '#713f12'], europa: ['#ffffff', '#cbd5e1', '#475569'], ice: ['#e0f2fe', '#7dd3fc', '#0c4a6e'] };
+let limbS = null; function grainMoon(x, y, r) { // limb darkening from a cached sprite (no per-frame gradient / blend-mode pass)
+  if (!limbS) { limbS = document.createElement('canvas'); limbS.width = limbS.height = 128; const b = limbS.getContext('2d'), g = b.createRadialGradient(64, 64, 35, 64, 64, 64); g.addColorStop(0, 'rgba(0,0,10,0)'); g.addColorStop(1, 'rgba(0,0,10,.5)'); b.fillStyle = g; b.fillRect(0, 0, 128, 128);
+    const p = b.globalCompositeOperation; b.globalCompositeOperation = 'source-atop'; b.globalAlpha = .12; b.drawImage(noiseTile(), 0, 0, 128, 128); b.globalCompositeOperation = p; }
+  ctx.drawImage(limbS, x - r, y - r, r * 2, r * 2); }
 function drawMoon(m, t, mi) {
   ctx.save(); ctx.translate(X(m.cx), Y(m.cy)); ctx.rotate(m.rot || 0); ctx.strokeStyle = 'rgba(248,113,113,.18)'; ctx.setLineDash([4, 6]); ctx.beginPath(); ctx.ellipse(0, 0, Math.max(1, R(m.a)), Math.max(1, R(m.b)), 0, 0, 7); ctx.stroke(); ctx.setLineDash([]); ctx.restore();
   const [mx, my] = S.moonPos(m, t); const x = X(mx), y = Y(my), r = R(m.r); const lt = lightAt(mx, my);
@@ -565,6 +650,8 @@ function drawMoon(m, t, mi) {
     for (let k = 0; k < 6; k++) { ctx.beginPath(); ctx.moveTo(x + (q() - .5) * r * 2.2, y - r); ctx.quadraticCurveTo(x + (q() - .5) * r * 2, y, x + (q() - .5) * r * 2.2, y + r); ctx.stroke(); } ctx.restore(); }
   else if (msk === 'ice') { ctx.fillStyle = 'rgba(255,255,255,.7)'; ctx.beginPath(); ctx.arc(x - r * .3, y - r * .3, r * .22, 0, 7); ctx.fill(); }
   else { ctx.fillStyle = 'rgba(51,65,85,.55)'; [[.3, -.2, .25], [-.35, .3, .18], [.05, .45, .12]].forEach(c => { ctx.beginPath(); ctx.arc(x + c[0] * r, y + c[1] * r, c[2] * r, 0, 7); ctx.fill(); }); }
+  ctx.save(); ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.clip(); grainMoon(x, y, r); ctx.restore();
+  glow(x + Math.cos(lt.a) * r * .45, y + Math.sin(lt.a) * r * .45, r * .4, 'rgba(255,255,255,A)', .3); ctx.strokeStyle = 'rgba(165,180,252,.3)'; ctx.lineWidth = Math.max(1, R(1.1)); ctx.beginPath(); ctx.arc(x, y, r * .95, lt.a + Math.PI - .9, lt.a + Math.PI + .9); ctx.stroke();
   const [nx, ny] = S.moonPos(m, t + 0.15); ctx.strokeStyle = 'rgba(248,113,113,.6)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(X(nx), Y(ny)); ctx.stroke();
 }
 function rectPath(a, i, jag) {
@@ -594,9 +681,17 @@ function astPaint(a, i, ask, live) {
 const AST_ZMAX = 1.14;
 function asteroidSprite(a, i, ask) {
   const key = 'ast' + i + (ask || '') + '@' + DPR + '_' + Math.round(SC * 1000); if (planetCache[key]) return planetCache[key];
-  const z0 = Z; Z = AST_ZMAX; const pw = R(a[2]) + 8, ph = R(a[3]) * 1.6 + 8, c = document.createElement('canvas'); c.width = Math.ceil(pw * DPR); c.height = Math.ceil(ph * DPR);
+  const z0 = Z; Z = AST_ZMAX; const pad = R(16), pw = R(a[2]) + 8 + pad * 2, ph = R(a[3]) * 1.6 + 8 + pad * 2, c = document.createElement('canvas'); c.width = Math.ceil(pw * DPR); c.height = Math.ceil(ph * DPR);
   const old = ctx; ctx = c.getContext('2d'); ctx.scale(DPR, DPR); ctx.translate(pw / 2, ph / 2);
-  try { astPaint(a, i, ask, false); } finally { ctx = old; Z = z0; }
+  try { // v3.3.0: the belt segment is a solid slab on the board — soft drop shadow, extruded side wall, textured top, bevelled lit edge
+    const [lx, ly] = localLight(a[4]), sx = -lx, sy = -ly, dep = R(5), OFF = 4000, side = ask === 'ice' ? ['#0e3a52', '#155e75'] : ask === 'metal' ? ['#0b1220', '#334155'] : ['#1c1917', '#44403c'];
+    ctx.save(); ctx.translate(-OFF, 0); ctx.shadowColor = 'rgba(0,0,6,.7)'; ctx.shadowBlur = R(7) * DPR; ctx.shadowOffsetX = (OFF + sx * R(9)) * DPR; ctx.shadowOffsetY = sy * R(9) * DPR; rectPath(a, i, true); ctx.fillStyle = '#000'; ctx.fill(); ctx.restore();
+    for (let k = 6; k >= 1; k--) { ctx.save(); ctx.translate(sx * dep * k / 6, sy * dep * k / 6); rectPath(a, i, true); ctx.fillStyle = k > 3 ? side[0] : side[1]; ctx.fill(); ctx.restore(); }
+    astPaint(a, i, ask, false);
+    ctx.save(); rectPath(a, i, true); ctx.clip(); const w = R(a[2]), h = R(a[3]); grainFill(ctx, -w / 2 - 4, -h, w + 8, h * 2, ask === 'ice' ? .25 : ask === 'metal' ? .3 : .6);
+    const bg = ctx.createLinearGradient(lx * w * .5, ly * h * .9, -lx * w * .5, -ly * h * .9); bg.addColorStop(0, 'rgba(255,255,255,.55)'); bg.addColorStop(.45, 'rgba(255,255,255,0)'); bg.addColorStop(.6, 'rgba(0,0,0,0)'); bg.addColorStop(1, 'rgba(0,0,0,.6)');
+    rectPath(a, i, true); ctx.strokeStyle = bg; ctx.lineWidth = R(3.2); ctx.stroke(); ctx.restore();
+  } finally { ctx = old; Z = z0; }
   return planetCache[key] = { c, pw, ph };
 }
 function drawAsteroid(a, i) {
@@ -610,9 +705,16 @@ function drawAsteroid(a, i) {
 }
 function drawGate(g, t) {
   if ((ship.keys >> g[5]) & 1) return;
-  ctx.save(); ctx.translate(X(g[0]), Y(g[1])); ctx.rotate(g[4]); const w = R(g[2]), h = R(g[3]);
-  ctx.fillStyle = `rgba(250,204,21,${0.35 + 0.15 * Math.sin(t * 4)})`; ctx.fillRect(-w / 2, -h / 2, w, h); ctx.strokeStyle = '#fde047'; ctx.lineWidth = 2; ctx.strokeRect(-w / 2, -h / 2, w, h);
-  for (let k = -w / 2 + 6; k < w / 2; k += 12) { ctx.beginPath(); ctx.moveTo(k, -h / 2); ctx.lineTo(k + 6, h / 2); ctx.stroke(); }
+  ctx.save(); ctx.translate(X(g[0]), Y(g[1])); ctx.rotate(g[4]); const w = R(g[2]), h = R(g[3]), [lx, ly] = localLight(g[4]), dep = R(4.5);
+  // v3.3.0: a solid hazard-striped steel barrier standing on the board (shadow, side wall, bevel)
+  ctx.fillStyle = 'rgba(0,0,6,.22)'; ctx.fillRect(-w / 2 - lx * R(9) - R(3), -h / 2 - ly * R(9) - R(3), w + R(6), h + R(6)); ctx.fillStyle = 'rgba(0,0,6,.38)'; ctx.fillRect(-w / 2 - lx * R(6), -h / 2 - ly * R(6), w, h);
+  ctx.fillStyle = '#5b3a0b'; ctx.fillRect(-w / 2 - lx * dep, -h / 2 - ly * dep, w, h); ctx.fillStyle = '#7c4f0e'; ctx.fillRect(-w / 2 - lx * dep * .5, -h / 2 - ly * dep * .5, w, h);
+  const mg = ctx.createLinearGradient(lx * w * .5, ly * h * .5, -lx * w * .5, -ly * h * .5); mg.addColorStop(0, '#fef08a'); mg.addColorStop(.5, '#eab308'); mg.addColorStop(1, '#a16207'); ctx.fillStyle = mg; ctx.fillRect(-w / 2, -h / 2, w, h);
+  ctx.save(); ctx.beginPath(); ctx.rect(-w / 2, -h / 2, w, h); ctx.clip(); ctx.fillStyle = 'rgba(28,25,23,.78)';
+  for (let k = -w / 2 - h; k < w / 2 + h; k += R(14)) { ctx.beginPath(); ctx.moveTo(k, -h / 2); ctx.lineTo(k + R(7), -h / 2); ctx.lineTo(k + R(7) + h, h / 2); ctx.lineTo(k + h, h / 2); ctx.closePath(); ctx.fill(); }
+  ctx.fillStyle = `rgba(254,240,138,${(.1 + .1 * Math.sin(t * 4)).toFixed(3)})`; ctx.fillRect(-w / 2, -h / 2, w, h); ctx.restore();
+  const bv = ctx.createLinearGradient(lx * w * .5, ly * h * .5, -lx * w * .5, -ly * h * .5); bv.addColorStop(0, 'rgba(255,255,255,.85)'); bv.addColorStop(.5, 'rgba(255,255,255,.1)'); bv.addColorStop(1, 'rgba(0,0,0,.6)');
+  ctx.strokeStyle = bv; ctx.lineWidth = Math.max(1, R(1.6)); ctx.strokeRect(-w / 2 + R(.8), -h / 2 + R(.8), w - R(1.6), h - R(1.6));
   ctx.font = `${R(14)}px sans-serif`; ctx.textAlign = 'center'; ctx.fillText('🔒', 0, R(5)); ctx.restore();
 }
 function drawKey(k, i, t) {
@@ -652,18 +754,31 @@ function drawMagnet(m, t) {
     neutronBeams(x, y, R(8), col); glow(x, y, R(22), `rgba(${col},A)`, .7); const cg = ctx.createRadialGradient(x, y, 0, x, y, R(8)); cg.addColorStop(0, '#ffffff'); cg.addColorStop(.5, '#e0f2fe'); cg.addColorStop(1, `rgba(${col},.9)`);
     ctx.fillStyle = cg; ctx.beginPath(); ctx.arc(x, y, R(7), 0, 7); ctx.fill(); ctx.strokeStyle = pol > 0 ? '#ef4444' : '#3b82f6'; ctx.lineWidth = R(2.5); ctx.beginPath(); ctx.arc(x, y, R(11 + Math.sin(t * 8) * .8), 0, 7); ctx.stroke();
     ctx.fillStyle = '#fff'; ctx.font = `bold ${R(12)}px sans-serif`; ctx.textAlign = 'center'; ctx.fillText(pol > 0 ? '+' : '−', x, y - R(15)); ctx.textAlign = 'left'; return; }
-  ctx.save(); ctx.translate(x, y); ctx.lineWidth = R(7); ctx.strokeStyle = pol > 0 ? '#ef4444' : '#3b82f6'; ctx.beginPath(); ctx.arc(0, R(2), R(11), 0, Math.PI); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(-R(11), R(2)); ctx.lineTo(-R(11), -R(10)); ctx.moveTo(R(11), R(2)); ctx.lineTo(R(11), -R(10)); ctx.stroke(); ctx.fillStyle = '#fff'; ctx.font = `bold ${R(12)}px sans-serif`; ctx.textAlign = 'center'; ctx.fillText(pol > 0 ? '+' : '−', 0, -R(14)); ctx.restore();
+  ctx.save(); ctx.translate(x, y); const hs = (dx, dy, lw, col) => { ctx.lineWidth = lw; ctx.strokeStyle = col; ctx.beginPath(); ctx.arc(dx, R(2) + dy, R(11), 0, Math.PI); ctx.moveTo(-R(11) + dx, R(2) + dy); ctx.lineTo(-R(11) + dx, -R(4) + dy); ctx.moveTo(R(11) + dx, R(2) + dy); ctx.lineTo(R(11) + dx, -R(4) + dy); ctx.stroke(); };
+  ctx.lineCap = 'butt'; hs(SDX * R(2.5), SDY * R(2.5), R(7), pol > 0 ? '#7f1d1d' : '#1e3a8a'); hs(SDX * R(1.2), SDY * R(1.2), R(7), pol > 0 ? '#991b1b' : '#1d4ed8'); hs(0, 0, R(7), pol > 0 ? '#ef4444' : '#3b82f6'); // v3.3.0 extruded
+  hs(Math.cos(KEY_A) * R(1.6), Math.sin(KEY_A) * R(1.6), R(1.8), 'rgba(255,255,255,.45)');
+  for (const sx of [-1, 1]) { const pg = ctx.createLinearGradient(sx * R(11) - R(3.5), 0, sx * R(11) + R(3.5), 0); pg.addColorStop(0, '#f1f5f9'); pg.addColorStop(1, '#475569'); ctx.fillStyle = '#1e293b'; ctx.fillRect(sx * R(11) - R(3.5) + SDX * R(2), -R(10) + SDY * R(2), R(7), R(6)); ctx.fillStyle = pg; ctx.fillRect(sx * R(11) - R(3.5), -R(10), R(7), R(6)); }
+  ctx.fillStyle = '#fff'; ctx.font = `bold ${R(12)}px sans-serif`; ctx.textAlign = 'center'; ctx.fillText(pol > 0 ? '+' : '−', 0, -R(14)); ctx.restore();
 }
 function drawPortal(t) {
   const x = X(L.portal[0]), y = Y(L.portal[1]), r = R(L.pr); glow(x, y, r * 2.4, 'rgba(34,211,238,A)', .35);
+  { const rf = r * 1.1, lw = Math.max(2, R(3.6)); ctx.strokeStyle = 'rgba(0,0,6,.5)'; ctx.lineWidth = lw * 1.5; ctx.beginPath(); ctx.arc(x + SDX * R(5), y + SDY * R(5), rf, 0, 7); ctx.stroke(); // v3.3.0: the gate ring is a machined torus on the board
+    const tg = ctx.createLinearGradient(x + Math.cos(KEY_A) * rf, y + Math.sin(KEY_A) * rf, x - Math.cos(KEY_A) * rf, y - Math.sin(KEY_A) * rf); tg.addColorStop(0, '#f1f5f9'); tg.addColorStop(.35, '#94a3b8'); tg.addColorStop(.7, '#334155'); tg.addColorStop(1, '#0f172a');
+    ctx.strokeStyle = tg; ctx.lineWidth = lw; ctx.beginPath(); ctx.arc(x, y, rf, 0, 7); ctx.stroke(); ctx.strokeStyle = 'rgba(103,232,249,.55)'; ctx.lineWidth = Math.max(.8, lw * .25); ctx.beginPath(); ctx.arc(x, y, rf - lw * .5, 0, 7); ctx.stroke();
+    ctx.strokeStyle = 'rgba(255,255,255,.75)'; ctx.lineWidth = Math.max(.8, lw * .3); ctx.beginPath(); ctx.arc(x, y, rf + lw * .15, KEY_A - .6, KEY_A + .6); ctx.stroke(); }
   ctx.save(); ctx.translate(x, y); for (let k = 0; k < 5; k++) { ctx.rotate(t * (0.8 + k * .3)); ctx.strokeStyle = `rgba(${k % 2 ? '165,243,252' : '34,211,238'},${.8 - k * .12})`; ctx.lineWidth = R(2.4); ctx.beginPath(); ctx.arc(0, 0, r * (1 - k * .16), k, k + 4.2); ctx.stroke(); } ctx.restore();
   glow(x, y, r * .6, 'rgba(236,254,255,A)', .95);
   if (y < 0 || y > H) { const ay = y < 0 ? 70 : H - 30; ctx.fillStyle = '#22d3ee'; ctx.font = `bold ${R(16)}px sans-serif`; ctx.textAlign = 'center'; ctx.fillText(T(y < 0 ? 'portal.up' : 'portal.down'), x, ay); ctx.textAlign = 'left'; }
 }
 function drawStar(s, k, t) {
   if (collected.has(k)) return; const x = X(s[0]), y = Y(s[1]), p = 1 + Math.sin(t * 4 + k) * .18; glow(x, y, R(22) * p, 'rgba(253,224,71,A)', .45);
-  ctx.save(); ctx.translate(x, y); ctx.rotate(t * .9 + k); ctx.scale(p, p); ctx.beginPath(); for (let i = 0; i < 10; i++) { const rr = R(i % 2 ? 5 : 11), a = i * Math.PI / 5 - Math.PI / 2; ctx.lineTo(Math.cos(a) * rr, Math.sin(a) * rr); } ctx.closePath(); ctx.fillStyle = '#fde047'; ctx.fill(); ctx.restore();
+  const bob = Math.sin(t * 2.2 + k) * R(1.5); cshadow(x, y, R(10) * p, R(9) + bob, .55);
+  const rot = t * .9 + k, [lx, ly] = localLight(rot); ctx.save(); ctx.translate(x, y - bob); ctx.rotate(rot); ctx.scale(p, p); // v3.3.0: faceted gold star (10 facets lit by the key light)
+  const ro = R(11.5), ri = R(5.2); for (let i = 0; i < 5; i++) { const a = i * Math.PI * 2 / 5 - Math.PI / 2, tx = Math.cos(a) * ro, ty = Math.sin(a) * ro;
+    for (const sd of [-1, 1]) { const ia = a + sd * Math.PI / 5, ix = Math.cos(ia) * ri, iy = Math.sin(ia) * ri, na = a + sd * .55; ctx.fillStyle = facetCol(.62 + .5 * (Math.cos(na) * lx + Math.sin(na) * ly));
+      ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(tx, ty); ctx.lineTo(ix, iy); ctx.closePath(); ctx.fill(); } }
+  ctx.strokeStyle = 'rgba(255,251,235,.55)'; ctx.lineWidth = Math.max(.6, R(.6)); ctx.beginPath(); for (let i = 0; i < 10; i++) { const rr = i % 2 ? ri : ro, a = i * Math.PI / 5 - Math.PI / 2; ctx.lineTo(Math.cos(a) * rr, Math.sin(a) * rr); } ctx.closePath(); ctx.stroke();
+  ctx.fillStyle = 'rgba(255,255,255,.9)'; ctx.beginPath(); ctx.arc(lx * R(2.2), ly * R(2.2), R(1.4), 0, 7); ctx.fill(); ctx.restore();
 }
 // v3.1.7: the ship is drawn a bit larger while aiming so it reads clearly at small scales; visual only, the hitbox is unchanged
 let shipVis = 1.3; const shipVisT = () => (state === 'aim' ? 1.32 : 1.12);
@@ -673,6 +788,7 @@ function drawShuttle() {
   const dt = drawShuttle.dt || .016; shipFX.sqT += dt;
   // banking from the turn rate (visual only)
   if (shipFX.pa != null && state === 'fly' && dt > 0) { const rate = wrapA(ang - shipFX.pa) / dt; shipFX.bank += (Math.max(-1, Math.min(1, rate * .32)) - shipFX.bank) * Math.min(1, dt * 5); } else shipFX.bank *= Math.max(0, 1 - dt * 4);
+  shipFX.spinA += shipFX.spinV * dt; shipFX.spinV *= Math.exp(-dt * 3.2); shipFX.spinA *= Math.exp(-dt * (state === 'fly' ? 2.6 : 8)); // v3.3.0 knock-spin from hits (visual)
   shipFX.pa = ang; shipFX.wheel += dt * (state === 'fly' ? Math.hypot(ship.vx, ship.vy) * .012 : .12);
   if (state === 'result' && shipFX.win) return drawWinFlourish(dt);
   // spaghettification: stretch toward the nearest hole
@@ -680,8 +796,8 @@ function drawShuttle() {
   const st = 1 + sp * sp * 0.95;
   // slow-motion echoes
   if (L && state === 'fly' && (slowT > 0 || tf < 0.75) && trail.length > 16) { for (let e = 4; e >= 1; e--) { const p = trail[Math.max(0, trail.length - 1 - e * 4)]; ctx.globalAlpha = 0.09 * (5 - e); drawHull(X(p.x), Y(p.y), ang, 1, 0, null, true); } ctx.globalAlpha = 1; }
-  const idle = state === 'aim' ? Math.sin(animT * 1.3) * .025 : 0;
-  drawHull(x, y + (state === 'aim' ? Math.sin(animT * 1.9) * R(.35) : 0), ang + idle, st, sa, lightAt(ship.x, ship.y), false);
+  const idle = state === 'aim' ? Math.sin(animT * 1.3) * .025 : 0; if (L) cshadow(x, y, R(8) * shipVis, R(12) * shipVis, .42); // v3.3.0 the ship hovers above the board
+  drawHull(x, y + (state === 'aim' ? Math.sin(animT * 1.9) * R(.35) : 0), ang + idle + shipFX.spinA, st, sa, lightAt(ship.x, ship.y), false);
 }
 // v3.2.0: win flourish — the ship spirals into the portal, shrinking, with a sparkle ring
 function drawWinFlourish(dt) {
@@ -694,7 +810,7 @@ function drawWinFlourish(dt) {
 }
 // v3.2.0: death animation — pulled into the hole (spiral, spaghettified, purple-shifted) or a tumbling break-up for other failures
 function drawDeath(dt) {
-  const d = shipFX.death; if (!d) return; d.t += dt; if (d.t > 1.1) return; const e = Math.min(1, d.t / (d.hx != null ? .8 : .6));
+  const d = shipFX.death; if (!d) return; d.t += dt; if (d.t > 1.1) return; const e = Math.min(1, d.t / (d.hx != null ? .8 : .35)); // v3.3.0: non-hole deaths blow apart (explodeFX) — the hull fades fast under the debris
   if (d.hx != null) { const q = e * e, a0 = Math.atan2(d.y - d.hy, d.x - d.hx), r0 = Math.hypot(d.x - d.hx, d.y - d.hy), aa = a0 + q * 5, r = r0 * (1 - q);
     const x = d.hx + Math.cos(aa) * r, y = d.hy + Math.sin(aa) * r; if (e >= 1) return; ctx.globalAlpha = 1 - q;
     drawHull(X(x), Y(y), aa + 1.57 + q * 2, 1 + q * 3, Math.atan2(d.hy - y, d.hx - x), { a: Math.atan2(d.hy - y, d.hx - x), c: '192,132,252', k: 1 }, false, R(1) * shipVis * (1 - q * .7), d.kind); ctx.globalAlpha = 1;
@@ -716,9 +832,9 @@ function drawHull(x, y, ang, st, sa, lt, ghostly, kk, kind) {
 }
 // v3.2.0: ship models live in ships.js (BHShips): pre-rendered high-res sprites + light per-frame layers
 // cold-gas puff (world coords): soft white cloud that expands and fades
-function puff(x, y, vx, vy) { parts.push({ x, y, vx, vy, l: .55 + Math.random() * .4, l0: .95, c: '#fff', r: 1.6 + Math.random(), puff: 1 }); }
-function smoke(x, y, vx, vy, r) { if (parts.length > 420) parts.splice(0, parts.length - 420); const l = .7 + Math.random() * .6; parts.push({ x, y, vx, vy, l, l0: l, r: r || 1.4 + Math.random(), smoke: 1, c: '' }); }
-function ice(x, y, vx, vy) { if (parts.length > 420) parts.splice(0, parts.length - 420); const l = .5 + Math.random() * .6; parts.push({ x, y, vx, vy, l, l0: l, r: .5 + Math.random() * .7, ice: 1, c: '', ph: Math.random() * 6 }); }
+function puff(x, y, vx, vy) { const p = pnew(x, y, vx, vy, .55 + Math.random() * .4, 1.6 + Math.random(), '#fff'); p.l0 = .95; p.puff = 1; }
+function smoke(x, y, vx, vy, r) { pnew(x, y, vx, vy, .7 + Math.random() * .6, r || 1.4 + Math.random(), '').smoke = 1; }
+function ice(x, y, vx, vy) { const p = pnew(x, y, vx, vy, .5 + Math.random() * .6, .5 + Math.random() * .7, ''); p.ice = 1; p.ph = Math.random() * 6; }
 function roadsterJets() { const a = ship.ang, ca = Math.cos(a), sa = Math.sin(a), W = (lx, ly) => [ship.x + ca * lx - sa * ly, ship.y + sa * lx + ca * ly];
   if (thrust > 0.02) for (const s of [-.45, .45]) for (let q = 0; q < 2; q++) { const [x, y] = W(-12.4, s); const j = (Math.random() - .5) * .45 + s * .25, v = 70 + Math.random() * 70; puff(x, y, ship.vx * .3 - Math.cos(a + j) * v, ship.vy * .3 - Math.sin(a + j) * v); if (Math.random() < .7) ice(x, y, ship.vx * .3 - Math.cos(a + j * 2) * v * 1.2, ship.vy * .3 - Math.sin(a + j * 2) * v * 1.2); }
   if (braking) for (const s of [-3.05, 3.05]) { const [x, y] = W(13.8, s); const j = (Math.random() - .5) * .6 + s * .05, v = 60 + Math.random() * 50; puff(x, y, ship.vx * .2 + Math.cos(a + j) * v, ship.vy * .2 + Math.sin(a + j) * v); if (Math.random() < .5) ice(x, y, ship.vx * .2 + Math.cos(a + j) * v * 1.3, ship.vy * .2 + Math.sin(a + j) * v * 1.3); } }
@@ -799,10 +915,19 @@ function drawBeam(v) {
 // ---------- v3.1.7 playfield boundary: energy barrier exactly on the out-of-bounds limit (sim3: x<-OOB, x>W+OOB, y<-OOB, y>H+OOB) ----------
 const OOB = 40; let edgeRipples = [], edgeNearT = 0;
 function edgeRect() { return [X(-OOB), Y(-OOB), X(L.W + OOB), Y(L.H + OOB)]; }
+let railS = null; function railStrips() { if (railS) return railS; const mk = (w, h, vert) => { const c = document.createElement('canvas'); c.width = w; c.height = h; const x = c.getContext('2d'), g = vert ? x.createLinearGradient(0, 0, 0, h) : x.createLinearGradient(0, 0, w, 0);
+    g.addColorStop(0, 'rgba(0,0,6,.5)'); g.addColorStop(1, 'rgba(0,0,6,0)'); x.fillStyle = g; x.fillRect(0, 0, w, h); return c; }; return railS = { v: mk(1, 64, true), h: mk(64, 1, false) }; }
 function drawBorder() {
   const [x0, y0, x1, y1] = edgeRect(), dt = drawShuttle.dt || .016, pc = ctx.globalCompositeOperation;
   // darker space outside the field
   ctx.fillStyle = 'rgba(3,1,14,.5)'; ctx.beginPath(); ctx.rect(-50, -50, W + 100, H + 100); ctx.rect(x0, y0, x1 - x0, y1 - y0); ctx.fill('evenodd');
+  // v3.3.0: the field edge is a bevelled rail — top/left rails throw a shadow onto the board, the bottom/right inner walls catch the key light
+  { const rw = Math.max(3, R(6)), sw = Math.max(8, R(18));
+    const st = railStrips(); // pre-rendered gradient strips (no gradient objects per frame)
+    if (y0 > -sw && y0 < H) ctx.drawImage(st.v, x0, y0, x1 - x0, sw); if (x0 > -sw && x0 < W) ctx.drawImage(st.h, x0, y0, sw, y1 - y0);
+    ctx.fillStyle = '#2e1065'; ctx.fillRect(x0 - rw, y0 - rw, x1 - x0 + rw * 2, rw); ctx.fillRect(x0 - rw, y0, rw, y1 - y0); // top/left rails: inner wall in shade
+    ctx.fillStyle = '#4338ca'; ctx.fillRect(x0 - rw, y1, x1 - x0 + rw * 2, rw); ctx.fillRect(x1, y0, rw, y1 - y0); // bottom/right rails: inner wall faces the light
+    ctx.fillStyle = 'rgba(199,210,254,.75)'; ctx.fillRect(x0, y1, x1 - x0, Math.max(1, rw * .25)); ctx.fillRect(x1, y0, Math.max(1, rw * .25), y1 - y0); }
   // soft violet haze just outside each visible edge
   const hz = Math.max(10, R(22)); ctx.globalCompositeOperation = 'lighter';
   const band = (gx0, gy0, gx1, gy1, rx, ry, rw, rh) => { const g = ctx.createLinearGradient(gx0, gy0, gx1, gy1); g.addColorStop(0, 'rgba(139,92,246,.16)'); g.addColorStop(1, 'rgba(139,92,246,0)'); ctx.fillStyle = g; ctx.fillRect(rx, ry, rw, rh); };
@@ -838,9 +963,15 @@ function avoidHint() { const h = $('hint'); if (!ship || !L || h.style.display =
   const up = hitB && !over(px, py, pr, t0, t0 + hh) && !over(sx, sy, rr, t0, t0 + hh), fade = hitB && !up;
   if (up) h.style.top = t0 + 'px'; h.classList.toggle('up', up); h.classList.toggle('fade', fade); }
 function drawFX(dt) {
-  for (const p of parts) if (p.smoke && p.l > 0) { const f = 1 - p.l / p.l0, rr = R(p.r * (1 + f * 3.2)); ctx.globalAlpha = .22 * (1 - f) * Math.min(1, f * 6 + .2); ctx.drawImage(smokeSprite(), X(p.x) - rr, Y(p.y) - rr, rr * 2, rr * 2); }
+  for (const p of parts) { if (p.l <= 0) continue; if (p.smoke) { const f = 1 - p.l / p.l0, rr = R(p.r * (1 + f * 3.2)); ctx.globalAlpha = .22 * (1 - f) * Math.min(1, f * 6 + .2); ctx.drawImage(smokeSprite(), X(p.x) - rr, Y(p.y) - rr, rr * 2, rr * 2); }
+    else if (p.deb) { const f = 1 - p.l / p.l0, r = R(p.r), x = X(p.x), y = Y(p.y), c = Math.cos(p.rot), sn = Math.sin(p.rot); ctx.globalAlpha = Math.min(1, p.l * 2.2); // lit / unlit face as it tumbles
+      ctx.fillStyle = Math.cos(p.rot * 1.7 - KEY_A) > 0 ? p.c : p.c2; ctx.beginPath(); ctx.moveTo(x + c * r, y + sn * r); ctx.lineTo(x - c * r * .6 - sn * r * .7, y - sn * r * .6 + c * r * .7); ctx.lineTo(x - c * r * .4 + sn * r * .8 * (1 - f * .3), y - sn * r * .4 - c * r * .8); ctx.closePath(); ctx.fill(); } }
   ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'lighter';
-  for (let i = parts.length - 1; i >= 0; i--) { const p = parts[i]; p.l -= dt; if (p.l <= 0) { parts.splice(i, 1); continue; } p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= .97; p.vy *= .97; if (p.smoke) { p.vx *= .985; p.vy *= .985; continue; }
+  for (let i = parts.length - 1; i >= 0; i--) { const p = parts[i]; p.l -= dt; if (p.l <= 0) { const last = parts.pop(); if (i < parts.length) parts[i] = last; if (pfree.length < 600) pfree.push(p); continue; } p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= .97; p.vy *= .97; if (p.smoke) { p.vx *= .985; p.vy *= .985; continue; }
+    if (p.deb) { p.rot += p.vr * dt; p.vx *= .985; p.vy *= .985; continue; }
+    if (p.streak) { const x = X(p.x), y = Y(p.y); ctx.globalAlpha = Math.min(1, p.l * 3); ctx.strokeStyle = p.c; ctx.lineWidth = Math.max(.8, R(p.r)); ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x - R(p.vx * .03), y - R(p.vy * .03)); ctx.stroke(); continue; }
+    if (p.ring) { const f = 1 - p.l / p.l0, e = 1 - (1 - f) * (1 - f); ctx.globalAlpha = (1 - f) * .85; ctx.strokeStyle = `rgb(${p.c})`; ctx.lineWidth = Math.max(.8, R(3.2) * (1 - f)); ctx.beginPath(); ctx.arc(X(p.x), Y(p.y), R(p.ph + (p.r - p.ph) * e), 0, 7); ctx.stroke(); continue; }
+    if (p.flash) { const f = 1 - p.l / p.l0; glow(X(p.x), Y(p.y), R(p.r) * (.7 + f * .5), `rgba(${p.c},A)`, (1 - f) * (1 - f)); continue; }
     if (p.ice) { const f = 1 - p.l / p.l0, tw = .55 + .45 * Math.sin(animT * 22 + p.ph), r = R(p.r) * (1.4 - f * .6), x = X(p.x), y = Y(p.y); ctx.globalAlpha = (1 - f) * tw; ctx.fillStyle = '#e0f2fe';
       ctx.beginPath(); ctx.moveTo(x, y - r * 1.6); ctx.lineTo(x + r * .35, y); ctx.lineTo(x, y + r * 1.6); ctx.lineTo(x - r * .35, y); ctx.closePath(); ctx.moveTo(x - r * 1.6, y); ctx.lineTo(x, y + r * .35); ctx.lineTo(x + r * 1.6, y); ctx.lineTo(x, y - r * .35); ctx.closePath(); ctx.fill(); continue; }
     if (p.puff) { const f = 1 - p.l / p.l0, rr = R(p.r * (1 + f * 5)); ctx.globalAlpha = .55 * (1 - f); ctx.drawImage(puffSprite(), X(p.x) - rr, Y(p.y) - rr, rr * 2, rr * 2); continue; }
@@ -913,7 +1044,7 @@ function frame(now) {
   ctx.save(); ctx.translate(sx, sy);
   if (inLevel) {
     const t = ship.t;
-    drawBorder();
+    drawBorder(); drawShadows();
     L.flares.forEach(f => drawFlare(f, t)); L.magnets.forEach(m => drawMagnet(m, animT));
     L.planets.forEach(drawPlanet); L.asteroids.forEach(drawAsteroid); L.gates.forEach(g => drawGate(g, animT)); L.worms.forEach((w, i) => drawWorm(w, animT, i));
     L.moons.forEach((m, mi) => drawMoon(m, t, mi)); L.holes.forEach(h => drawHoleTop(h, t));
@@ -1030,7 +1161,7 @@ $('fail').onclick = e => { if (e.target.closest('#bLv2,#bFailMenu')) return; arR
 $('bFailMenu').onclick = () => { failTok++; toMenu(); };
 $('bLv').onclick = $('bLv2').onclick = () => { failTok++; curSector = CAT.secOf[li]; buildLevels(); show('levels'); AU.theme(secTheme(curSector)); };
 AU.configure(save.set); applyLang(); toMenu();
-window.BH = { get shipFX() { return shipFX; }, get shipsMade() { return SHIPS.made; }, LEVELS, startLevel, launch: (a, p) => launch(a, p), get state() { return state; }, get ship() { return ship; }, get clock() { return clock; }, toMenu, save, persist,
+window.BH = { get shipFX() { return shipFX; }, get parts() { return parts; }, get pfree() { return pfree.length; }, PCAP, impactFX: h => impactFX(h), explodeFX: (x, y) => explodeFX(x, y, 0, 0, save.set.ship), get shipsMade() { return SHIPS.made; }, LEVELS, startLevel, launch: (a, p) => launch(a, p), get state() { return state; }, get ship() { return ship; }, get clock() { return clock; }, toMenu, save, persist,
   advance(n, brake, tg) { braking = !!brake && ship.fuel > 0; for (let i = 0; i < n && state === 'fly'; i++) { if (tg != null && i === tg) ship.flip = -ship.flip; tick(); } braking = false; },
   runPlanStep(st) { launch(st.a, st.p); for (let i = 0; i < 2600 && state === 'fly'; i++) { if (st.tg != null && i === st.tg) ship.flip = -ship.flip; braking = st.b != null && i >= st.b && ship.fuel > 0; tick(); } braking = false; },
   show, buildSectors, syncSettings, buildAch, buildStats, achCheck, get gl() { return useGL; }, get quality() { return qLevel; }, get zoom() { return Z; }, CAT, levelId: LID, unlockAll() { LEVELS.forEach((_, i) => save.open[LID(i)] = 1); persist(); }, get braking() { return braking; }, get pressing() { return !!press; }, toScreen(x, y) { return [X(x), Y(y)]; }, stepN(n) { for (let i = 0; i < n && state === 'fly'; i++) tick(); }, freeze(b) { frozen = !!b; }, forceWin() { if (state === 'aim' || state === 'fly') { clock = clock || 2.5; win(); } }, buildCodex, get facts() { return save.facts; }, get trapT() { return trapT; }, get trapHint() { return trapHint; }, get failTok() { return failTok; }, get hintPath() { return hintPath; }, get skin() { return L && L.skin; }, setBraking: v => { braking = !!v; }, get parts() { return parts; }, toggleMus, drawShipPrev, useHintPath, solverPath, get edgeRect() { return L ? edgeRect() : null; }, get dpr() { return DPR; }, get qs() { return QS; }, get shipVis() { return shipVis; }, get noseOffset() { return noseOffset(); }, readoutPos, get canvasPx() { return [cv.width, cv.height, W, H]; }, get aimV() { return aim && aim.ang != null ? aimVec() : null; }, get aimDir() { return save.set.aim; }, setShip(x, y, vx, vy) { ship.x = x; ship.y = y; ship.vx = vx; ship.vy = vy; } };

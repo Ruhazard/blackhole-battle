@@ -1,4 +1,4 @@
-/* Blackhole Battle v3.2.1 — procedural WebAudio sound (no samples; everything synthesized at runtime) */
+/* Blackhole Battle v3.3.0 — procedural WebAudio sound (no samples; everything synthesized at runtime) */
 window.BHAudio = (() => {
   'use strict';
   let ac = null, comp, master, musBus, sfxBus, musPre, musDuck, sfxPre, echoIn, noiseBuf = null, shipOut = null, shipPan = null, waveBuf = null;

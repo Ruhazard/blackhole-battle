@@ -3,7 +3,8 @@
   const G = 120, SOFT = 300, MAX_SPEED = 560, STEP = 1 / 120, STOP_SPEED = 14, MAX_PULL = 110;
   const launchSpeed = p => 50 + p * 2.6;            // p = pull 0..110
   const fuelFor = L => L.stops * 1.35 + 0.25;
-  const KILL = 1.35;                                 // event horizon kill radius = r*KILL
+  const KILL = 1.35;
+  const MU = { planet: 0.14, rock: 0.09, metal: 0.05 }; // v3.3.0 tangential (Coulomb) friction per surface                                 // event horizon kill radius = r*KILL
   const LIST = ['holes', 'whites', 'planets', 'moons', 'asteroids', 'worms', 'fields', 'flares', 'gates', 'keys', 'magnets', 'stars'];
   function prep(src) {
     const L = JSON.parse(JSON.stringify(src));
@@ -38,12 +39,20 @@
     for (const f of L.fields) if (x > f[0] && x < f[0] + f[2] && y > f[1] && y < f[1] + f[3]) { ax += f[4] * f[6]; ay += f[5] * f[6]; }
     return [ax, ay];
   }
-  function bounceCircle(o, cx, cy, r, rest) {
+  // v3.3.0 contact response: restitution drops a little for hard hits; Coulomb friction scrubs the tangential speed in proportion to the
+  // normal impulse (glancing hits keep almost all their speed, head-on hits lose more and pick up spin). Returns impact info for FX.
+  function respond(o, nx, ny, rest, mu, wx, wy) {
+    const vn = o.vx * nx + o.vy * ny; if (vn >= 0) return { x: wx, y: wy, nx, ny, vn: 0, vt: 0, spin: 0 };
+    const e = rest - 0.12 * Math.min(1, -vn / 420), jn = -(1 + e) * vn; o.vx += jn * nx; o.vy += jn * ny;
+    const tx = -ny, ty = nx, vt = o.vx * tx + o.vy * ty, dvt = Math.min(Math.abs(vt), mu * jn) * Math.sign(vt);
+    o.vx -= dvt * tx; o.vy -= dvt * ty;
+    return { x: wx, y: wy, nx, ny, vn: -vn, vt, spin: dvt };
+  }
+  function bounceCircle(o, cx, cy, r, rest, mu) {
     const dx = o.x - cx, dy = o.y - cy, d = Math.hypot(dx, dy), R = r + 7;
-    if (d >= R || d === 0) return false;
+    if (d >= R || d === 0) return null;
     const nx = dx / d, ny = dy / d; o.x = cx + nx * (R + 0.5); o.y = cy + ny * (R + 0.5);
-    const vn = o.vx * nx + o.vy * ny; if (vn < 0) { o.vx -= (1 + rest) * vn * nx; o.vy -= (1 + rest) * vn * ny; }
-    return true;
+    return respond(o, nx, ny, rest, mu || 0, cx + nx * r, cy + ny * r);
   }
   function hitRect(o, a) { // returns contact info or null; a=[x,y,w,h,ang]
     const c = Math.cos(-a[4]), s = Math.sin(-a[4]);
@@ -55,11 +64,10 @@
     const nx = dx / d, ny = dy / d, cb = Math.cos(a[4]), sb = Math.sin(a[4]);
     return { nx: nx * cb - ny * sb, ny: nx * sb + ny * cb, wx: nxl * cb - nyl * sb + a[0], wy: nxl * sb + nyl * cb + a[1] };
   }
-  function bounceRect(o, a, rest) {
-    const h = hitRect(o, a); if (!h) return false;
+  function bounceRect(o, a, rest, mu) {
+    const h = hitRect(o, a); if (!h) return null;
     o.x = h.wx + h.nx * 7.5; o.y = h.wy + h.ny * 7.5;
-    const vn = o.vx * h.nx + o.vy * h.ny; if (vn < 0) { o.vx -= (1 + rest) * vn * h.nx; o.vy -= (1 + rest) * vn * h.ny; }
-    return true;
+    return respond(o, h.nx, h.ny, rest, mu || 0, h.wx, h.wy);
   }
   // one fixed step. ctl: {brake:bool}
   function step(o, L, ctl) {
@@ -70,13 +78,14 @@
     if (ctl && ctl.brake && o.fuel > 0) { const k = Math.pow(0.06, d); o.vx *= k; o.vy *= k; o.fuel = Math.max(0, o.fuel - STEP); }
     const sp = Math.hypot(o.vx, o.vy); if (sp > MAX_SPEED) { o.vx *= MAX_SPEED / sp; o.vy *= MAX_SPEED / sp; }
     o.x += o.vx * d; o.y += o.vy * d; o.t += d; if (o.wcd > 0) o.wcd -= d;
-    const ev = { tf, bounce: false, broke: -1, worm: false, key: -1 };
-    for (const p of L.planets) if (bounceCircle(o, p[0], p[1], p[2], 0.8)) ev.bounce = true;
+    const ev = { tf, bounce: false, broke: -1, worm: false, key: -1, hit: null };
+    let h;
+    for (const p of L.planets) if ((h = bounceCircle(o, p[0], p[1], p[2], 0.8, MU.planet))) { ev.bounce = true; h.kind = 'planet'; ev.hit = h; }
     for (let i = 0; i < L.asteroids.length; i++) {
       const a = L.asteroids[i]; if (a[5] && (o.broken >> i) & 1) continue;
-      if (bounceRect(o, a, 0.92)) { ev.bounce = true; if (a[5]) { o.broken |= 1 << i; ev.broke = i; } }
+      if ((h = bounceRect(o, a, 0.92, MU.rock))) { ev.bounce = true; h.kind = a[5] ? 'frag' : 'rock'; h.i = i; ev.hit = h; if (a[5]) { o.broken |= 1 << i; ev.broke = i; } }
     }
-    for (const g of L.gates) if (!((o.keys >> g[5]) & 1) && bounceRect(o, g, 0.9)) ev.bounce = true;
+    for (const g of L.gates) if (!((o.keys >> g[5]) & 1) && (h = bounceRect(o, g, 0.9, MU.metal))) { ev.bounce = true; h.kind = 'metal'; ev.hit = h; }
     for (let i = 0; i < L.keys.length; i++) if (!((o.keys >> i) & 1) && Math.hypot(o.x - L.keys[i][0], o.y - L.keys[i][1]) < 20) { o.keys |= 1 << i; ev.key = i; }
     if (o.wcd <= 0) for (const w of L.worms) for (const [A, B] of [[w.a, w.b], [w.b, w.a]]) {
       if (Math.hypot(o.x - A[0], o.y - A[1]) < (w.r || 16)) {
@@ -116,5 +125,5 @@
     tr.last = a; tr.ang += da;
     return stale || Math.abs(tr.ang) > TRAP_REV * 2 * Math.PI;
   }
-  root.BHSim = { G, SOFT, STEP, STOP_SPEED, MAX_PULL, KILL, launchSpeed, fuelFor, prep, newShip, holePos, holeMass, moonPos, flareOn, dilation, accel, step, status, hitRect, TRAP_REV, TRAP_SECS, TRAP_NOPROG, trapNew, trapStep };
+  root.BHSim = { G, SOFT, STEP, STOP_SPEED, MAX_PULL, KILL, launchSpeed, fuelFor, MU, prep, newShip, holePos, holeMass, moonPos, flareOn, dilation, accel, step, status, hitRect, TRAP_REV, TRAP_SECS, TRAP_NOPROG, trapNew, trapStep };
 })(typeof window !== 'undefined' ? window : globalThis);
