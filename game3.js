@@ -1,4 +1,4 @@
-/* Blackhole Battle v3.3.0 — stage 2: visuals, sound, progress (gameplay/physics unchanged from v3.0) */
+/* Blackhole Battle v3.3.1 — stage 2: visuals, sound, progress (gameplay/physics unchanged from v3.0) */
 (() => {
 'use strict';
 const S = window.BHSim;
@@ -148,13 +148,19 @@ const HINT_EVERY = 10, HINT_MS = 5200; let hintPath = null; // ideal-path star-d
 let braking = false, trail = [], attempt = [], ghost = null, parts = [], pops = [], shake = 0, aim = null, preview = [], tf = 1, animT = 0, curSector = 0, thrust = 0;
 let active = {}, scanArmed = false, shieldOn = false, slowT = 0, heartT = 0, press = null, aimId = null, launchT = -1e9, flySteps = 0, trap = null, trapT = 0, trapHint = false, failTok = 0, lastTick = 0, ghostLevel = -1;
 
+// v3.3.1: build every per-level sprite before the first frame (was: on the first rendered frame -> level-start hitch)
+const GLOW_PRE = ['129,140,248', '224,242,254', '236,254,255', '248,113,113', '250,204,21', '251,146,60', '253,224,71', '255,255,255', '34,211,238', '96,165,250', '52,211,153', '244,114,182', '255,237,213'];
+function prewarm() { if (!L || !SC) return; GLOW_PRE.forEach(c => glowSprite(`rgba(${c},A)`)); L.planets.forEach((p, i) => { const sp = planetSprite(p, i, Math.round(p[2] * SC * 1.14 * 4) / 4); glowSprite(`rgba(${sp.rgb},A)`); }); shadowSprite(); noiseTile(); railStrips(); smokeSprite(); puffSprite();
+  L.planets.forEach((p, i) => planetSprite(p, i, Math.round(p[2] * SC * 1.14 * 4) / 4)); L.asteroids.forEach((a, i) => asteroidSprite(a, i, skinOf('asteroids', i)));
+  L.holes.forEach(h => wellSprite(Math.round(h.r * SC * AST_ZMAX * 4) / 4)); L.gates.forEach((g, gi) => gateSprite(g, gi)); if (L.magnets.length) { magSprite(1); magSprite(-1); }
+  torusSprite(); if (L.moons.length) grainMoonInit(); if (L.stars.length) for (let k = 0; k < 16; k++) starSprite(k); if (L.magnets.length) { magSprite(1); magSprite(-1); } } // stars/magnets: level-independent pieceCache -> built once per DPR, later levels reuse them
 function startLevel(i, keepGhost) {
   if (!keepGhost || ghostLevel !== i) { ghost = null; }
   hintPath = null; li = i; ensureBG(SECTORS[CAT.secOf[i]].pal); AU.theme(secTheme(CAT.secOf[i])); L = S.prep(LEVELS[i]); L.skin = resolveSkins(LID(i), L); ship = S.newShip(L); ship.ang = -Math.PI / 2;
   launchesLeft = L.L; collected = new Set(); clock = 0; started = false; resetInput();
   shipFX.death = null; shipFX.win = null; shipFX.sqT = 9; shipFX.bank = 0; shipFX.pa = null; shipFX.spinA = 0; shipFX.spinV = 0; smokeSprite(); // prewarm (no canvas creation on the first launch)
   trail = []; attempt = []; pclear(); pops = []; edgeRipples = []; aim = null; preview = []; tf = 1; active = {}; scanArmed = false; shieldOn = false; slowT = 0;
-  planetCache = {}; camWY = clampCam(ship.y); Z = 1; camCX = 180; camCY = camWY + 320; fl = { bounces: 0, margin: 1e9 }; AU.aimEnd(); state = 'aim'; show(null); $('hud').style.display = 'flex'; hudSet('hTime', 'text', '0.0');
+  planetCache = {}; prewarm(); camWY = clampCam(ship.y); Z = 1; camCX = 180; camCY = camWY + 320; fl = { bounces: 0, margin: 1e9 }; AU.aimEnd(); state = 'aim'; show(null); $('hud').style.display = 'flex'; hudSet('hTime', 'text', '0.0');
   $('hLevel').textContent = `${i + 1}. ${lvName(i)}`; $('hTarget').textContent = L.t3 ? `3★ ≤ ${L.t3}${T('hud.sec')}` : '';
   $('chipFuel').style.display = L.stops ? '' : 'none'; syncHintBtn();
   hud(); buildPU(); requestAnimationFrame(placeAch);
@@ -635,10 +641,9 @@ function neutronBeams(x, y, r, col) { const a = animT * 2.2, pc = ctx.globalComp
     ctx.fillStyle = g; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + Math.cos(a + s - .14) * r * 5, y + Math.sin(a + s - .14) * r * 5); ctx.lineTo(x + Math.cos(a + s + .14) * r * 5, y + Math.sin(a + s + .14) * r * 5); ctx.closePath(); ctx.fill(); }
   ctx.globalCompositeOperation = pc; }
 const MSKIN = { luna: ['#f8fafc', '#94a3b8', '#1e293b'], io: ['#fef9c3', '#eab308', '#713f12'], europa: ['#ffffff', '#cbd5e1', '#475569'], ice: ['#e0f2fe', '#7dd3fc', '#0c4a6e'] };
-let limbS = null; function grainMoon(x, y, r) { // limb darkening from a cached sprite (no per-frame gradient / blend-mode pass)
-  if (!limbS) { limbS = document.createElement('canvas'); limbS.width = limbS.height = 128; const b = limbS.getContext('2d'), g = b.createRadialGradient(64, 64, 35, 64, 64, 64); g.addColorStop(0, 'rgba(0,0,10,0)'); g.addColorStop(1, 'rgba(0,0,10,.5)'); b.fillStyle = g; b.fillRect(0, 0, 128, 128);
+function grainMoonInit() { if (limbS) return; limbS = document.createElement('canvas'); limbS.width = limbS.height = 128; const b = limbS.getContext('2d'), g = b.createRadialGradient(64, 64, 35, 64, 64, 64); g.addColorStop(0, 'rgba(0,0,10,0)'); g.addColorStop(1, 'rgba(0,0,10,.5)'); b.fillStyle = g; b.fillRect(0, 0, 128, 128);
     const p = b.globalCompositeOperation; b.globalCompositeOperation = 'source-atop'; b.globalAlpha = .12; b.drawImage(noiseTile(), 0, 0, 128, 128); b.globalCompositeOperation = p; }
-  ctx.drawImage(limbS, x - r, y - r, r * 2, r * 2); }
+let limbS = null; function grainMoon(x, y, r) { grainMoonInit(); ctx.drawImage(limbS, x - r, y - r, r * 2, r * 2); } // limb darkening from a cached sprite
 function drawMoon(m, t, mi) {
   ctx.save(); ctx.translate(X(m.cx), Y(m.cy)); ctx.rotate(m.rot || 0); ctx.strokeStyle = 'rgba(248,113,113,.18)'; ctx.setLineDash([4, 6]); ctx.beginPath(); ctx.ellipse(0, 0, Math.max(1, R(m.a)), Math.max(1, R(m.b)), 0, 0, 7); ctx.stroke(); ctx.setLineDash([]); ctx.restore();
   const [mx, my] = S.moonPos(m, t); const x = X(mx), y = Y(my), r = R(m.r); const lt = lightAt(mx, my);
@@ -703,19 +708,25 @@ function drawAsteroid(a, i) {
   if (a[5]) { ctx.strokeStyle = 'rgba(255,255,255,.85)'; ctx.lineWidth = 1.5; const w = R(a[2]); ctx.beginPath(); for (let k = -2; k <= 2; k++) { ctx.moveTo(k * w / 6, -R(a[3]) / 2); ctx.lineTo(k * w / 6 + R(5), 0); ctx.lineTo(k * w / 6 - R(3), R(a[3]) / 2); } ctx.stroke(); }
   ctx.restore();
 }
-function drawGate(g, t) {
-  if ((ship.keys >> g[5]) & 1) return;
-  ctx.save(); ctx.translate(X(g[0]), Y(g[1])); ctx.rotate(g[4]); const w = R(g[2]), h = R(g[3]), [lx, ly] = localLight(g[4]), dep = R(4.5);
-  // v3.3.0: a solid hazard-striped steel barrier standing on the board (shadow, side wall, bevel)
+// v3.3.1: static board pieces are baked once per level at max-zoom size (per DPR) and blitted scaled — no gradients / text / path work per frame
+const pieceCache = {}; // level-independent pieces (stars, magnets): kept across levels, keyed by DPR/scale
+function baked(key, size, paint, keep) { const k = key + '@' + DPR + '_' + Math.round(SC * 1000), cache = keep ? pieceCache : planetCache; const sp = cache[k]; if (sp) return sp;
+  const z0 = Z, old = ctx; Z = AST_ZMAX; const [pw, ph] = size(); const c = document.createElement('canvas'); c.width = Math.ceil(pw * DPR); c.height = Math.ceil(ph * DPR);
+  ctx = c.getContext('2d'); ctx.scale(DPR, DPR); ctx.translate(pw / 2, ph / 2); try { paint(); } finally { ctx = old; Z = z0; } return cache[k] = { c, pw, ph }; }
+function blit(sp, x, y, sc) { const f = Z / AST_ZMAX * (sc || 1); ctx.drawImage(sp.c, x - sp.pw / 2 * f, y - sp.ph / 2 * f, sp.pw * f, sp.ph * f); }
+function gateSprite(g, gi) { return baked('gate' + gi, () => [Math.hypot(R(g[2]), R(g[3])) + R(26), Math.hypot(R(g[2]), R(g[3])) + R(26)], () => { ctx.rotate(g[4]); gateBody(g); }); }
+function gateBody(g) { const w = R(g[2]), h = R(g[3]), [lx, ly] = localLight(g[4]), dep = R(4.5);
   ctx.fillStyle = 'rgba(0,0,6,.22)'; ctx.fillRect(-w / 2 - lx * R(9) - R(3), -h / 2 - ly * R(9) - R(3), w + R(6), h + R(6)); ctx.fillStyle = 'rgba(0,0,6,.38)'; ctx.fillRect(-w / 2 - lx * R(6), -h / 2 - ly * R(6), w, h);
   ctx.fillStyle = '#5b3a0b'; ctx.fillRect(-w / 2 - lx * dep, -h / 2 - ly * dep, w, h); ctx.fillStyle = '#7c4f0e'; ctx.fillRect(-w / 2 - lx * dep * .5, -h / 2 - ly * dep * .5, w, h);
   const mg = ctx.createLinearGradient(lx * w * .5, ly * h * .5, -lx * w * .5, -ly * h * .5); mg.addColorStop(0, '#fef08a'); mg.addColorStop(.5, '#eab308'); mg.addColorStop(1, '#a16207'); ctx.fillStyle = mg; ctx.fillRect(-w / 2, -h / 2, w, h);
   ctx.save(); ctx.beginPath(); ctx.rect(-w / 2, -h / 2, w, h); ctx.clip(); ctx.fillStyle = 'rgba(28,25,23,.78)';
-  for (let k = -w / 2 - h; k < w / 2 + h; k += R(14)) { ctx.beginPath(); ctx.moveTo(k, -h / 2); ctx.lineTo(k + R(7), -h / 2); ctx.lineTo(k + R(7) + h, h / 2); ctx.lineTo(k + h, h / 2); ctx.closePath(); ctx.fill(); }
-  ctx.fillStyle = `rgba(254,240,138,${(.1 + .1 * Math.sin(t * 4)).toFixed(3)})`; ctx.fillRect(-w / 2, -h / 2, w, h); ctx.restore();
+  for (let k = -w / 2 - h; k < w / 2 + h; k += R(14)) { ctx.beginPath(); ctx.moveTo(k, -h / 2); ctx.lineTo(k + R(7), -h / 2); ctx.lineTo(k + R(7) + h, h / 2); ctx.lineTo(k + h, h / 2); ctx.closePath(); ctx.fill(); } ctx.restore();
   const bv = ctx.createLinearGradient(lx * w * .5, ly * h * .5, -lx * w * .5, -ly * h * .5); bv.addColorStop(0, 'rgba(255,255,255,.85)'); bv.addColorStop(.5, 'rgba(255,255,255,.1)'); bv.addColorStop(1, 'rgba(0,0,0,.6)');
   ctx.strokeStyle = bv; ctx.lineWidth = Math.max(1, R(1.6)); ctx.strokeRect(-w / 2 + R(.8), -h / 2 + R(.8), w - R(1.6), h - R(1.6));
-  ctx.font = `${R(14)}px sans-serif`; ctx.textAlign = 'center'; ctx.fillText('🔒', 0, R(5)); ctx.restore();
+  ctx.font = `${R(14)}px sans-serif`; ctx.textAlign = 'center'; ctx.fillText('🔒', 0, R(5)); ctx.textAlign = 'left'; }
+function drawGate(g, t, gi) {
+  if ((ship.keys >> g[5]) & 1) return; const x = X(g[0]), y = Y(g[1]); blit(gateSprite(g, gi), x, y);
+  ctx.save(); ctx.translate(x, y); ctx.rotate(g[4]); ctx.fillStyle = `rgba(254,240,138,${(.1 + .1 * Math.sin(t * 4)).toFixed(3)})`; const w = R(g[2]), h = R(g[3]); ctx.fillRect(-w / 2, -h / 2, w, h); ctx.restore();
 }
 function drawKey(k, i, t) {
   if ((ship.keys >> i) & 1) return; const x = X(k[0]), y = Y(k[1]); glow(x, y, R(26), 'rgba(250,204,21,A)', .5);
@@ -754,18 +765,22 @@ function drawMagnet(m, t) {
     neutronBeams(x, y, R(8), col); glow(x, y, R(22), `rgba(${col},A)`, .7); const cg = ctx.createRadialGradient(x, y, 0, x, y, R(8)); cg.addColorStop(0, '#ffffff'); cg.addColorStop(.5, '#e0f2fe'); cg.addColorStop(1, `rgba(${col},.9)`);
     ctx.fillStyle = cg; ctx.beginPath(); ctx.arc(x, y, R(7), 0, 7); ctx.fill(); ctx.strokeStyle = pol > 0 ? '#ef4444' : '#3b82f6'; ctx.lineWidth = R(2.5); ctx.beginPath(); ctx.arc(x, y, R(11 + Math.sin(t * 8) * .8), 0, 7); ctx.stroke();
     ctx.fillStyle = '#fff'; ctx.font = `bold ${R(12)}px sans-serif`; ctx.textAlign = 'center'; ctx.fillText(pol > 0 ? '+' : '−', x, y - R(15)); ctx.textAlign = 'left'; return; }
-  ctx.save(); ctx.translate(x, y); const hs = (dx, dy, lw, col) => { ctx.lineWidth = lw; ctx.strokeStyle = col; ctx.beginPath(); ctx.arc(dx, R(2) + dy, R(11), 0, Math.PI); ctx.moveTo(-R(11) + dx, R(2) + dy); ctx.lineTo(-R(11) + dx, -R(4) + dy); ctx.moveTo(R(11) + dx, R(2) + dy); ctx.lineTo(R(11) + dx, -R(4) + dy); ctx.stroke(); };
-  ctx.lineCap = 'butt'; hs(SDX * R(2.5), SDY * R(2.5), R(7), pol > 0 ? '#7f1d1d' : '#1e3a8a'); hs(SDX * R(1.2), SDY * R(1.2), R(7), pol > 0 ? '#991b1b' : '#1d4ed8'); hs(0, 0, R(7), pol > 0 ? '#ef4444' : '#3b82f6'); // v3.3.0 extruded
+  blit(magSprite(pol), x, y);
+}
+function magSprite(pol) { return baked('mag' + (pol > 0 ? 1 : 0), () => [R(44), R(48)], () => {
+  const hs = (dx, dy, lw, col) => { ctx.lineWidth = lw; ctx.strokeStyle = col; ctx.beginPath(); ctx.arc(dx, R(2) + dy, R(11), 0, Math.PI); ctx.moveTo(-R(11) + dx, R(2) + dy); ctx.lineTo(-R(11) + dx, -R(4) + dy); ctx.moveTo(R(11) + dx, R(2) + dy); ctx.lineTo(R(11) + dx, -R(4) + dy); ctx.stroke(); };
+  ctx.lineCap = 'butt'; hs(SDX * R(2.5), SDY * R(2.5), R(7), pol > 0 ? '#7f1d1d' : '#1e3a8a'); hs(SDX * R(1.2), SDY * R(1.2), R(7), pol > 0 ? '#991b1b' : '#1d4ed8'); hs(0, 0, R(7), pol > 0 ? '#ef4444' : '#3b82f6');
   hs(Math.cos(KEY_A) * R(1.6), Math.sin(KEY_A) * R(1.6), R(1.8), 'rgba(255,255,255,.45)');
   for (const sx of [-1, 1]) { const pg = ctx.createLinearGradient(sx * R(11) - R(3.5), 0, sx * R(11) + R(3.5), 0); pg.addColorStop(0, '#f1f5f9'); pg.addColorStop(1, '#475569'); ctx.fillStyle = '#1e293b'; ctx.fillRect(sx * R(11) - R(3.5) + SDX * R(2), -R(10) + SDY * R(2), R(7), R(6)); ctx.fillStyle = pg; ctx.fillRect(sx * R(11) - R(3.5), -R(10), R(7), R(6)); }
-  ctx.fillStyle = '#fff'; ctx.font = `bold ${R(12)}px sans-serif`; ctx.textAlign = 'center'; ctx.fillText(pol > 0 ? '+' : '−', 0, -R(14)); ctx.restore();
-}
+  ctx.fillStyle = '#fff'; ctx.font = `bold ${R(12)}px sans-serif`; ctx.textAlign = 'center'; ctx.fillText(pol > 0 ? '+' : '−', 0, -R(14)); ctx.textAlign = 'left'; }, true); }
+function torusSprite() { return baked('torus' + L.pr, () => [R(L.pr) * 2.2 + R(22), R(L.pr) * 2.2 + R(22)], () => { const r = R(L.pr), rf = r * 1.1, lw = Math.max(2, R(3.6));
+  ctx.strokeStyle = 'rgba(0,0,6,.5)'; ctx.lineWidth = lw * 1.5; ctx.beginPath(); ctx.arc(SDX * R(5), SDY * R(5), rf, 0, 7); ctx.stroke();
+  const tg = ctx.createLinearGradient(Math.cos(KEY_A) * rf, Math.sin(KEY_A) * rf, -Math.cos(KEY_A) * rf, -Math.sin(KEY_A) * rf); tg.addColorStop(0, '#f1f5f9'); tg.addColorStop(.35, '#94a3b8'); tg.addColorStop(.7, '#334155'); tg.addColorStop(1, '#0f172a');
+  ctx.strokeStyle = tg; ctx.lineWidth = lw; ctx.beginPath(); ctx.arc(0, 0, rf, 0, 7); ctx.stroke(); ctx.strokeStyle = 'rgba(103,232,249,.55)'; ctx.lineWidth = Math.max(.8, lw * .25); ctx.beginPath(); ctx.arc(0, 0, rf - lw * .5, 0, 7); ctx.stroke();
+  ctx.strokeStyle = 'rgba(255,255,255,.75)'; ctx.lineWidth = Math.max(.8, lw * .3); ctx.beginPath(); ctx.arc(0, 0, rf + lw * .15, KEY_A - .6, KEY_A + .6); ctx.stroke(); }); }
 function drawPortal(t) {
   const x = X(L.portal[0]), y = Y(L.portal[1]), r = R(L.pr); glow(x, y, r * 2.4, 'rgba(34,211,238,A)', .35);
-  { const rf = r * 1.1, lw = Math.max(2, R(3.6)); ctx.strokeStyle = 'rgba(0,0,6,.5)'; ctx.lineWidth = lw * 1.5; ctx.beginPath(); ctx.arc(x + SDX * R(5), y + SDY * R(5), rf, 0, 7); ctx.stroke(); // v3.3.0: the gate ring is a machined torus on the board
-    const tg = ctx.createLinearGradient(x + Math.cos(KEY_A) * rf, y + Math.sin(KEY_A) * rf, x - Math.cos(KEY_A) * rf, y - Math.sin(KEY_A) * rf); tg.addColorStop(0, '#f1f5f9'); tg.addColorStop(.35, '#94a3b8'); tg.addColorStop(.7, '#334155'); tg.addColorStop(1, '#0f172a');
-    ctx.strokeStyle = tg; ctx.lineWidth = lw; ctx.beginPath(); ctx.arc(x, y, rf, 0, 7); ctx.stroke(); ctx.strokeStyle = 'rgba(103,232,249,.55)'; ctx.lineWidth = Math.max(.8, lw * .25); ctx.beginPath(); ctx.arc(x, y, rf - lw * .5, 0, 7); ctx.stroke();
-    ctx.strokeStyle = 'rgba(255,255,255,.75)'; ctx.lineWidth = Math.max(.8, lw * .3); ctx.beginPath(); ctx.arc(x, y, rf + lw * .15, KEY_A - .6, KEY_A + .6); ctx.stroke(); }
+  blit(torusSprite(), x, y); // v3.3.0 machined torus ring (baked in 3.3.1)
   ctx.save(); ctx.translate(x, y); for (let k = 0; k < 5; k++) { ctx.rotate(t * (0.8 + k * .3)); ctx.strokeStyle = `rgba(${k % 2 ? '165,243,252' : '34,211,238'},${.8 - k * .12})`; ctx.lineWidth = R(2.4); ctx.beginPath(); ctx.arc(0, 0, r * (1 - k * .16), k, k + 4.2); ctx.stroke(); } ctx.restore();
   glow(x, y, r * .6, 'rgba(236,254,255,A)', .95);
   if (y < 0 || y > H) { const ay = y < 0 ? 70 : H - 30; ctx.fillStyle = '#22d3ee'; ctx.font = `bold ${R(16)}px sans-serif`; ctx.textAlign = 'center'; ctx.fillText(T(y < 0 ? 'portal.up' : 'portal.down'), x, ay); ctx.textAlign = 'left'; }
@@ -773,13 +788,14 @@ function drawPortal(t) {
 function drawStar(s, k, t) {
   if (collected.has(k)) return; const x = X(s[0]), y = Y(s[1]), p = 1 + Math.sin(t * 4 + k) * .18; glow(x, y, R(22) * p, 'rgba(253,224,71,A)', .45);
   const bob = Math.sin(t * 2.2 + k) * R(1.5); cshadow(x, y, R(10) * p, R(9) + bob, .55);
-  const rot = t * .9 + k, [lx, ly] = localLight(rot); ctx.save(); ctx.translate(x, y - bob); ctx.rotate(rot); ctx.scale(p, p); // v3.3.0: faceted gold star (10 facets lit by the key light)
+  const P5 = Math.PI * 2 / 5, st = Math.floor((((t * .9 + k) % P5 + P5) % P5) / P5 * 16) % 16; blit(starSprite(st), x, y - bob, p);
+}
+function starSprite(st) { return baked('star' + st, () => [R(28), R(28)], () => { const rot = st / 16 * Math.PI * 2 / 5, [lx, ly] = localLight(rot); ctx.rotate(rot); // faceted gold star (10 facets lit by the key light)
   const ro = R(11.5), ri = R(5.2); for (let i = 0; i < 5; i++) { const a = i * Math.PI * 2 / 5 - Math.PI / 2, tx = Math.cos(a) * ro, ty = Math.sin(a) * ro;
     for (const sd of [-1, 1]) { const ia = a + sd * Math.PI / 5, ix = Math.cos(ia) * ri, iy = Math.sin(ia) * ri, na = a + sd * .55; ctx.fillStyle = facetCol(.62 + .5 * (Math.cos(na) * lx + Math.sin(na) * ly));
       ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(tx, ty); ctx.lineTo(ix, iy); ctx.closePath(); ctx.fill(); } }
   ctx.strokeStyle = 'rgba(255,251,235,.55)'; ctx.lineWidth = Math.max(.6, R(.6)); ctx.beginPath(); for (let i = 0; i < 10; i++) { const rr = i % 2 ? ri : ro, a = i * Math.PI / 5 - Math.PI / 2; ctx.lineTo(Math.cos(a) * rr, Math.sin(a) * rr); } ctx.closePath(); ctx.stroke();
-  ctx.fillStyle = 'rgba(255,255,255,.9)'; ctx.beginPath(); ctx.arc(lx * R(2.2), ly * R(2.2), R(1.4), 0, 7); ctx.fill(); ctx.restore();
-}
+  ctx.fillStyle = 'rgba(255,255,255,.9)'; ctx.beginPath(); ctx.arc(lx * R(2.2), ly * R(2.2), R(1.4), 0, 7); ctx.fill(); }, true); }
 // v3.1.7: the ship is drawn a bit larger while aiming so it reads clearly at small scales; visual only, the hitbox is unchanged
 let shipVis = 1.3; const shipVisT = () => (state === 'aim' ? 1.32 : 1.12);
 function drawShuttle() {
@@ -1046,7 +1062,7 @@ function frame(now) {
     const t = ship.t;
     drawBorder(); drawShadows();
     L.flares.forEach(f => drawFlare(f, t)); L.magnets.forEach(m => drawMagnet(m, animT));
-    L.planets.forEach(drawPlanet); L.asteroids.forEach(drawAsteroid); L.gates.forEach(g => drawGate(g, animT)); L.worms.forEach((w, i) => drawWorm(w, animT, i));
+    L.planets.forEach(drawPlanet); L.asteroids.forEach(drawAsteroid); L.gates.forEach((g, gi) => drawGate(g, animT, gi)); L.worms.forEach((w, i) => drawWorm(w, animT, i));
     L.moons.forEach((m, mi) => drawMoon(m, t, mi)); L.holes.forEach(h => drawHoleTop(h, t));
     drawPortal(animT); L.keys.forEach((k, i) => drawKey(k, i, animT)); L.stars.forEach((s, k) => drawStar(s, k, animT));
     drawGhost(); drawHintPath(); drawTrail(); drawAim(); if (state !== 'fail') drawShuttle(); else drawDeath(dt); if (state === 'aim' && aim && aim.ang != null) drawBeam(aimVec()); drawFX(dt); if (!useGL) drawSlowmo();

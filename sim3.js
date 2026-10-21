@@ -4,7 +4,7 @@
   const launchSpeed = p => 50 + p * 2.6;            // p = pull 0..110
   const fuelFor = L => L.stops * 1.35 + 0.25;
   const KILL = 1.35;
-  const MU = { planet: 0.14, rock: 0.09, metal: 0.05 }; // v3.3.0 tangential (Coulomb) friction per surface                                 // event horizon kill radius = r*KILL
+  const MU = { planet: 0.14, rock: 0.09, metal: 0.05 }; // v3.3.1: per-level scale L.muK (ricochet levels play with slicker surfaces) // v3.3.0 tangential (Coulomb) friction per surface                                 // event horizon kill radius = r*KILL
   const LIST = ['holes', 'whites', 'planets', 'moons', 'asteroids', 'worms', 'fields', 'flares', 'gates', 'keys', 'magnets', 'stars'];
   function prep(src) {
     const L = JSON.parse(JSON.stringify(src));
@@ -80,12 +80,12 @@
     o.x += o.vx * d; o.y += o.vy * d; o.t += d; if (o.wcd > 0) o.wcd -= d;
     const ev = { tf, bounce: false, broke: -1, worm: false, key: -1, hit: null };
     let h;
-    for (const p of L.planets) if ((h = bounceCircle(o, p[0], p[1], p[2], 0.8, MU.planet))) { ev.bounce = true; h.kind = 'planet'; ev.hit = h; }
+    for (const p of L.planets) if ((h = bounceCircle(o, p[0], p[1], p[2], 0.8, MU.planet * (L.muK ?? 1)))) { ev.bounce = true; h.kind = 'planet'; ev.hit = h; }
     for (let i = 0; i < L.asteroids.length; i++) {
       const a = L.asteroids[i]; if (a[5] && (o.broken >> i) & 1) continue;
-      if ((h = bounceRect(o, a, 0.92, MU.rock))) { ev.bounce = true; h.kind = a[5] ? 'frag' : 'rock'; h.i = i; ev.hit = h; if (a[5]) { o.broken |= 1 << i; ev.broke = i; } }
+      if ((h = bounceRect(o, a, 0.92, MU.rock * (L.muK ?? 1)))) { ev.bounce = true; h.kind = a[5] ? 'frag' : 'rock'; h.i = i; ev.hit = h; if (a[5]) { o.broken |= 1 << i; ev.broke = i; } }
     }
-    for (const g of L.gates) if (!((o.keys >> g[5]) & 1) && (h = bounceRect(o, g, 0.9, MU.metal))) { ev.bounce = true; h.kind = 'metal'; ev.hit = h; }
+    for (const g of L.gates) if (!((o.keys >> g[5]) & 1) && (h = bounceRect(o, g, 0.9, MU.metal * (L.muK ?? 1)))) { ev.bounce = true; h.kind = 'metal'; ev.hit = h; }
     for (let i = 0; i < L.keys.length; i++) if (!((o.keys >> i) & 1) && Math.hypot(o.x - L.keys[i][0], o.y - L.keys[i][1]) < 20) { o.keys |= 1 << i; ev.key = i; }
     if (o.wcd <= 0) for (const w of L.worms) for (const [A, B] of [[w.a, w.b], [w.b, w.a]]) {
       if (Math.hypot(o.x - A[0], o.y - A[1]) < (w.r || 16)) {

@@ -75,12 +75,17 @@ root.BH3_SRC = [
 root.BH3_SRC.forEach((L, i) => { L.sector = Math.floor(i / 10); L.stub = L.stub || (i % 10 === 0 ? 2 : 1); });
 // v3.3.0 difficulty smoothing: widen narrow belt gaps (world units per side) on levels the solver flagged as spikes after the contact-friction change.
 // Only the two asteroid edges facing a gap move; belt ends at the walls stay put. Values come from tools/retune330.js (see logs/v330).
-const GAPW = { 9: 20, 20: 20, 33: 20, 37: 20, 40: 20, 41: 20, 47: 10, 50: 30 };
+const GAPW = { 9: 20, 20: 20, 33: 20, 37: 20, 40: 20, 41: 20, 47: 10, 50: [30, 20] };
 function widenGaps(as, d) { const rows = {}; as.forEach(a => { if (!a[4]) (rows[a[1] + '_' + a[3]] = rows[a[1] + '_' + a[3]] || []).push(a); });
   for (const k in rows) { const r = rows[k].sort((p, q) => p[0] - q[0]); for (let j = 0; j + 1 < r.length; j++) { const A = r[j], C = r[j + 1], gap = (C[0] - C[2] / 2) - (A[0] + A[2] / 2);
     if (gap < 0 || gap > 200) continue; const dA = Math.min(d, A[2] * .3), dC = Math.min(d, C[2] * .3); A[2] -= dA; A[0] -= dA / 2; C[2] -= dC; C[0] += dC / 2; } } }
 // ...and soften the pull of the hole(s) where the bottleneck is gravity rather than a gap (mass factor)
-const HOLEK = { 9: 0.55, 30: 0.7, 50: 0.65 };
-root.BH3_SRC.forEach((L, i) => { const d = GAPW[i + 1]; if (d && L.asteroids) widenGaps(L.asteroids, d); const k = HOLEK[i + 1]; if (k && L.holes) L.holes.forEach(h => h.m = Math.round(h.m * k)); });
-root.BH3_widenGaps = widenGaps; root.BH3_GAPW = GAPW; root.BH3_HOLEK = HOLEK;
+const HOLEK = { 9: 0.55, 30: 0.7, 50: [0.65, 0.8] }; // arrays apply in sequence (3.3.0 value, then the 3.3.1 step)
+// v3.3.1: per-level surface friction scale (ricochet puzzles: friction must not make them harder than their sector peers)
+const MUK = { 14: 0, 17: 0 };
+// v3.3.1: shorten wall-anchored slabs at their free end (world units) — opens zig-zag passages without moving the layout
+const SHORT = { 39: 30 };
+function shortenSlabs(as, d, W) { as.forEach(a => { if (a[4]) return; const l = a[0] - a[2] / 2, r = a[0] + a[2] / 2, dd = Math.min(d, a[2] * .3); if (l < 0 && r < W) { a[2] -= dd; a[0] -= dd / 2; } else if (r > W && l > 0) { a[2] -= dd; a[0] += dd / 2; } }); }
+root.BH3_SRC.forEach((L, i) => { const d = GAPW[i + 1]; if (d && L.asteroids) [].concat(d).forEach(x => widenGaps(L.asteroids, x)); const k = HOLEK[i + 1]; if (k && L.holes) [].concat(k).forEach(x => L.holes.forEach(h => h.m = Math.round(h.m * x))); if (MUK[i + 1] != null) L.muK = MUK[i + 1]; if (SHORT[i + 1] && L.asteroids) shortenSlabs(L.asteroids, SHORT[i + 1], L.W || 360); });
+root.BH3_widenGaps = widenGaps; root.BH3_GAPW = GAPW; root.BH3_HOLEK = HOLEK; root.BH3_shortenSlabs = shortenSlabs;
 })(typeof window !== 'undefined' ? window : globalThis);
