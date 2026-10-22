@@ -1,4 +1,4 @@
-/* Blackhole Battle v3.3.1 — stage 2: visuals, sound, progress (gameplay/physics unchanged from v3.0) */
+/* Blackhole Battle v3.3.2 — stage 2: visuals, sound, progress (gameplay/physics unchanged from v3.0) */
 (() => {
 'use strict';
 const S = window.BHSim;
@@ -160,13 +160,24 @@ function startLevel(i, keepGhost) {
   launchesLeft = L.L; collected = new Set(); clock = 0; started = false; resetInput();
   shipFX.death = null; shipFX.win = null; shipFX.sqT = 9; shipFX.bank = 0; shipFX.pa = null; shipFX.spinA = 0; shipFX.spinV = 0; smokeSprite(); // prewarm (no canvas creation on the first launch)
   trail = []; attempt = []; pclear(); pops = []; edgeRipples = []; aim = null; preview = []; tf = 1; active = {}; scanArmed = false; shieldOn = false; slowT = 0;
-  planetCache = {}; prewarm(); camWY = clampCam(ship.y); Z = 1; camCX = 180; camCY = camWY + 320; fl = { bounces: 0, margin: 1e9 }; AU.aimEnd(); state = 'aim'; show(null); $('hud').style.display = 'flex'; hudSet('hTime', 'text', '0.0');
+  planetCache = {}; prewarm(); camWY = clampCam(ship.y); Z = 1; camCX = 180; camCY = camWY + 320; camOX = 0; camOY = 0; keepShipInView(0, true); fl = { bounces: 0, margin: 1e9 }; AU.aimEnd(); state = 'aim'; show(null); $('hud').style.display = 'flex'; hudSet('hTime', 'text', '0.0');
   $('hLevel').textContent = `${i + 1}. ${lvName(i)}`; $('hTarget').textContent = L.t3 ? `3★ ≤ ${L.t3}${T('hud.sec')}` : '';
   $('chipFuel').style.display = L.stops ? '' : 'none'; syncHintBtn();
   hud(); buildPU(); requestAnimationFrame(placeAch);
   const h = $('hint'); h.innerHTML = '💡 ' + (i === 0 && save.set.aim === 'direct' ? T('tut.direct') : I18N.lvHint(LID(i), L.hint)); h.style.display = 'block';
   $('hand').classList.toggle('dir', save.set.aim === 'direct'); $('hand').style.display = (i === 0 && !save.tut.aim) ? 'block' : 'none';
 }
+// v3.3.2: keep the ship + its aim ring (with margin) fully on screen, horizontally and vertically, in every state.
+// The target offset depends only on the ship position and the base camera (no feedback), so it cannot oscillate; it is eased (snapped at level start).
+let camOX = 0, camOY = 0;
+function keepShipInView(dt, snap) {
+  const hp = hintPath && hintPath.head, fx = hp ? hp[0] : ship.x, fy = hp ? hp[1] : ship.y; // the star-dust hint head takes the camera while it plays
+  const k = SC * Z, m = (Math.max(30, R(34)) + 10) / k, bx = camCX, by = camCY;
+  const lo = fx + m - ((W - OX) / SC - 180) / Z, hi = fx - m + (OX / SC + 180) / Z; // allowed camCX range
+  const loY = fy + m - ((H - OY) / SC - 320) / Z, hiY = fy - m + (OY / SC + 320) / Z;
+  const tx = lo > hi ? fx - bx : Math.min(hi, Math.max(lo, bx)) - bx, ty = loY > hiY ? fy - by : Math.min(hiY, Math.max(loY, by)) - by;
+  const e = snap ? 1 : Math.min(1, dt * 6); camOX += (tx - camOX) * e; camOY += (ty - camOY) * e; if (Math.abs(camOX) < .01) camOX = 0; if (Math.abs(camOY) < .01) camOY = 0;
+  camCX = bx + camOX; camCY = by + camOY; }
 function clampCam(y) { return L.H <= 640 ? 0 : Math.max(0, Math.min(L.H - 640, y - 380)); }
 // v3.1.7: hud() runs every flight frame; it now only touches the DOM when a value actually changed (was innerHTML rebuilds + style writes each frame)
 const hudC = {}; function hudSet(id, prop, v) { const k = id + prop; if (hudC[k] === v) return; hudC[k] = v; const e = $(id); if (prop === 'html') e.innerHTML = v; else if (prop === 'text') e.textContent = v; else if (prop === 'cls') e.classList.toggle('on', v); else e.style[prop] = v; }
@@ -1040,6 +1051,7 @@ function frame(now) {
   const tZ = 1 + 0.13 * cp; Z += (tZ - Z) * Math.min(1, dt * (tZ > Z ? 2.2 : 1.5));
   const zf = (Z - 1) / 0.13 * 0.45, baseCY = camWY + 320;
   camCX = L && ship ? 180 + (ship.x - 180) * zf : 180; camCY = L && ship ? baseCY + (ship.y - baseCY) * zf : 320;
+  if (L && ship) keepShipInView(dt); else { camOX = 0; camOY = 0; }
   AU.update({ pan: ship && L ? Math.max(-1, Math.min(1, (X(ship.x) - W / 2) / (W / 2))) : 0, dop: state === 'fly' ? shipDop() : 0, fly: state === 'fly', braking: braking && state === 'fly', speed: ship && L ? Math.hypot(ship.vx, ship.vy) : 0, prox: state === 'fly' ? proxK : (L ? 0 : 0.35), tf: state === 'fly' ? (slowT > 0 ? 0.5 : tf) : 1, aiming: state === 'aim' && !!aim });
   // auto quality
   if (save.set.q === 'auto') { fpsT += (now - (frame.p || now)) / 1000; fpsN++; if (fpsT >= 2.5) { const fps = fpsN / fpsT; fpsT = 0; fpsN = 0;

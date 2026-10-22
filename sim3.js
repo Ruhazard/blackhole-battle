@@ -2,7 +2,8 @@
 (function (root) {
   const G = 120, SOFT = 300, MAX_SPEED = 560, STEP = 1 / 120, STOP_SPEED = 14, MAX_PULL = 110;
   const launchSpeed = p => 50 + p * 2.6;            // p = pull 0..110
-  const fuelFor = L => L.stops * 1.35 + 0.25;
+  const FUEL_K = s => s >= 2 ? 1.22 : s === 1 ? 1.1 : 1; // v3.3.2: multi-launch levels get a bigger brake budget (bar drains slower): +10% per stop for stops=1, +22% for stops>=2
+  const fuelFor = L => L.stops * 1.35 * FUEL_K(L.stops) + 0.25;
   const KILL = 1.35;
   const MU = { planet: 0.14, rock: 0.09, metal: 0.05 }; // v3.3.1: per-level scale L.muK (ricochet levels play with slicker surfaces) // v3.3.0 tangential (Coulomb) friction per surface                                 // event horizon kill radius = r*KILL
   const LIST = ['holes', 'whites', 'planets', 'moons', 'asteroids', 'worms', 'fields', 'flares', 'gates', 'keys', 'magnets', 'stars'];
