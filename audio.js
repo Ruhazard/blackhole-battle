@@ -1,4 +1,4 @@
-/* Blackhole Battle v3.3.2 — procedural WebAudio sound (no samples; everything synthesized at runtime) */
+/* Blackhole Battle v3.4.0 — procedural WebAudio sound (no samples; everything synthesized at runtime) */
 window.BHAudio = (() => {
   'use strict';
   let ac = null, comp, master, musBus, sfxBus, musPre, musDuck, sfxPre, echoIn, noiseBuf = null, shipOut = null, shipPan = null, waveBuf = null;
@@ -280,6 +280,22 @@ window.BHAudio = (() => {
      hum.o[0].frequency.setTargetAtTime(44 + sp * 70, t, 0.06); hum.o[1].frequency.setTargetAtTime(44.6 + sp * 71, t, 0.06); hum.f.frequency.setTargetAtTime(160 + sp * 900, t, 0.06);
     rumble.g.gain.setTargetAtTime(Math.pow(prox, 1.6) * 0.6, t, 0.12); rumble.s.frequency.setTargetAtTime(22 + 14 * tfNow, t, 0.2); rumble.lfo.frequency.setTargetAtTime(0.5 + 2.6 * prox * tfNow, t, 0.2);
   }
+  // v3.4.0 L51 "Expedition": throttle-driven engines + automatic RCS (separate from update(); levels 1–50 never call it)
+  // st: {on, thr 0..1, rcs 0..1, prox 0..1, pan -1..1}
+  function airPuff(tt, a) { const n = noise(), hp = F('highpass', 2600 + Math.random() * 1200, 0.7), bp = F('peaking', 5200, 2), g = G(0), d = 0.07 + Math.random() * 0.07; bp.gain.value = 6;
+    n.connect(hp); hp.connect(bp); bp.connect(g); g.connect(shipOut); g.gain.setValueAtTime(0.0001, tt); g.gain.linearRampToValueAtTime(a, tt + 0.004); g.gain.exponentialRampToValueAtTime(0.0001, tt + d); n.start(tt, Math.random()); n.stop(tt + d + 0.02); }
+  function drive(st) {
+    if (!ac || !eng) return; const t = now(), k = shipKind(), on = !!st.on, T = on ? Math.max(0, Math.min(1, st.thr || 0)) : 0, rc = on ? Math.max(0, Math.min(1, st.rcs || 0)) : 0, sh = eng.shuttle, rd = eng.roadster;
+    if (shipPan && shipPan.pan) shipPan.pan.setTargetAtTime(Math.max(-1, Math.min(1, st.pan || 0)) * 0.4, t, 0.08);
+    hum.g.gain.setTargetAtTime(0.0001, t, 0.1);
+    sh.g.gain.setTargetAtTime(on && k === 'shuttle' ? 0.03 + T * 0.27 : 0.0001, t, 0.12); if (k === 'shuttle') colour(0.05 + T * 0.9, t, 0.12, 0);
+    const rpm = 38 + T * 95; rd.g.gain.setTargetAtTime(on && k === 'roadster' ? 0.025 + T * 0.085 : 0.0001, t, 0.1); rd.o[0].frequency.setTargetAtTime(rpm, t, 0.12); rd.o[1].frequency.setTargetAtTime(rpm * 0.502, t, 0.12);
+    rd.lp.frequency.setTargetAtTime(360 + T * 1500, t, 0.12); rd.lfo.frequency.setTargetAtTime(rpm / 4, t, 0.12); rd.wh.frequency.setTargetAtTime(650 + T * 2300, t, 0.12);
+    eng.retro.g.gain.setTargetAtTime(on && k === 'shuttle' && rc > 0.12 ? 0.45 : 0.0001, t, 0.03); eng.screech.g.gain.setTargetAtTime(0.0001, t, 0.05);
+    if (on && rc > 0.12) { if (!(eng.np > t)) eng.np = t + 0.01; while (eng.np < t + 0.12) { if (k === 'shuttle') puff(eng.np); else airPuff(eng.np, 0.05 + rc * 0.07); eng.np += 0.06 + -Math.log(1 - Math.random()) * (0.16 - rc * 0.09); } }
+    const pr = on ? st.prox || 0 : 0; rumble.g.gain.setTargetAtTime(Math.pow(pr, 1.6) * 0.6, t, 0.15); rumble.lfo.frequency.setTargetAtTime(0.5 + 2.6 * pr, t, 0.2);
+    thickGain.gain.setTargetAtTime(Math.pow(pr, 1.5) * 0.12, t, 0.6);
+    lastSet.drive = k; }
   // ---------- one-shot SFX (scheduled at currentTime for tight timing) ----------
   function aimStart() { if (!ac || tension) return; lastSet.aim = shipKind(); if (shipKind() === 'roadster') return revStart(); const t = now(), R = rocketBufs();
     // v3.2.1 shuttle aim: turbopump spool-up = noise band rising with drag + faint narrow-band whine + rumble building (no oscillators)
@@ -381,7 +397,7 @@ window.BHAudio = (() => {
   if (typeof document !== 'undefined') document.addEventListener('visibilitychange', () => document.hidden ? suspend() : resume());
   // while an offline render owns the globals, live game calls are ignored (they would otherwise drive the offline graph)
   const W = f => function () { if (offline) return; return f.apply(null, arguments); };
-  return { unlock: W(unlock), suspend: W(suspend), resume: W(resume), configure: W(configure), update: W(update), aimStart: W(aimStart), aimPower: W(aimPower), aimEnd: W(aimEnd), launch: W(launch), bounce: W(bounce), star: W(star), win: W(win), lose: W(lose),
+  return { unlock: W(unlock), suspend: W(suspend), resume: W(resume), configure: W(configure), update: W(update), drive: W(drive), aimStart: W(aimStart), aimPower: W(aimPower), aimEnd: W(aimEnd), launch: W(launch), bounce: W(bounce), star: W(star), win: W(win), lose: W(lose),
     magnet: W(magnet), key: W(key), worm: W(worm), pickShip: W(pickShip), stop: W(stop), crash: W(crash), shield: W(shield), click: W(click), ach: W(ach), theme: W(M(theme)), Composer, THEMES, THEME_IDS,
     renderOffline: (sc, d, r) => offline ? Promise.reject(new Error('busy')) : renderOffline(sc, d, r), get debug() { return { loops: eng ? { shuttle: eng.shuttle.g.gain.value, roadster: eng.roadster.g.gain.value, retro: eng.retro.g.gain.value, screech: eng.screech.g.gain.value } : null, master: master ? master.gain.value : 0, sfx: sfxBus ? sfxBus.gain.value : 0, live: liveSrc, made: madeSrc, sets: Object.assign({}, lastSet), ship: shipKind(), tension: !!tension, theme: themeName, songs: songs.length, layers: song ? Object.keys(song.lg).filter(k => song.lg[k].gain.value > 0.05) : [], mus: musBus ? musBus.gain.value : null, audible: musAudible(), state: ac && ac.state, pan: shipPan ? shipPan.pan.value : null, shipBus: !!shipOut, det: eng ? eng.roadster.o[0].detune.value : null, cut: eng ? eng.shuttle.lp.frequency.value : null }; }, get on() { return !!ac && ac.state === 'running'; } };
 })();

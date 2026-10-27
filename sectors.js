@@ -31,10 +31,12 @@ window.BHCat = (() => {
     });
     const byId = {}; sectors.forEach(s => byId[s.id] = s);
     const stars = sv => Object.values(sv.best).reduce((a, b) => a + (b.s || 0), 0);
-    function sectorOpen(sv, k) { const s = sectors[k]; if (!s || s.soon) return false; if (s.ids.some(id => sv.open[id] || sv.best[id])) return true;
+    // v3.4.0 test build: every real level is selectable regardless of progress (saves untouched); ?locks restores normal locking
+    const openAll = () => typeof window !== 'undefined' && window.BH_OPEN_ALL !== false && !(window.location && /[?&]locks\b/.test(window.location.search));
+    function sectorOpen(sv, k) { const s = sectors[k]; if (!s || s.soon) return false; if (openAll()) return true; if (s.ids.some(id => sv.open[id] || sv.best[id])) return true;
       const u = s.unlock || {}; if (u.after) { const p = byId[u.after]; if (!p || !p.ids.length || !sv.best[p.ids[p.ids.length - 1]]) return false; }
       if (u.stars && stars(sv) < u.stars) return false; return true; }
-    function levelOpen(sv, i) { const id = idOf[i]; if (!id) return false; if (sv.open[id] || sv.best[id]) return true; const s = sectors[secOf[i]]; return s.idx[0] === i && sectorOpen(sv, s.k); }
+    function levelOpen(sv, i) { const id = idOf[i]; if (!id) return false; if (openAll() && !sectors[secOf[i]].soon) return true; if (sv.open[id] || sv.best[id]) return true; const s = sectors[secOf[i]]; return s.idx[0] === i && sectorOpen(sv, s.k); }
     function lockText(s) { const I = typeof window !== 'undefined' && window.I18N, T = (k, v, f) => I ? I.t(k, v) : f;
              if (s.soon) return T('sec.soonText', null, 'Скоро'); const u = s.unlock || {}; const t = [];
              if (u.after) { const p = byId[u.after]; const n = I ? I.secName(p) : p.n; t.push(T('sec.lockBoss', { n }, `переможи боса «${n}»`)); }

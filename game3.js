@@ -1,4 +1,4 @@
-/* Blackhole Battle v3.3.2 — stage 2: visuals, sound, progress (gameplay/physics unchanged from v3.0) */
+/* Blackhole Battle v3.4.0 — stage 2: visuals, sound, progress (gameplay/physics unchanged from v3.0) */
 (() => {
 'use strict';
 const S = window.BHSim;
@@ -1031,6 +1031,7 @@ function shipDop() { if (!L || !ship || !L.holes.length) return 0; let best = nu
   const vr = ((best[0] - ship.x) * ship.vx + (best[1] - ship.y) * ship.vy) / Math.max(1, bd); return Math.max(-1, Math.min(1, vr / 400)) * proxK; }
 let last = performance.now(), acc = 0, frozen = false;
 function frame(now) {
+  if (window.BHExp && BHExp.active) { last = now; requestAnimationFrame(frame); return; } // v3.4.0: L51 mode renders itself
   const dt = Math.min(0.05, (now - last) / 1000); last = now; animT += dt; drawShuttle.dt = dt; if ($('settings').classList.contains('on')) drawShipPrev();
   if (L && state === 'fly') {
     if (press && !braking && L.stops && ship.fuel > 0 && now - press.t >= HOLD_MS) { braking = true; hud(); }
@@ -1106,6 +1107,7 @@ function buildSectors() {
     d.innerHTML = `<b>${open ? '' : s.soon ? '⏳ ' : '🔒 '}${i + 1}. ${I18N.secName(s)}${s.soon ? ` <span class="badge">${T('sec.soon')}</span>` : ''}</b><small>${I18N.secDesc(s)}</small>${st}${open || s.soon ? '' : `<small class="lk">${CAT.lockText(s)}</small>`}`;
     d.onclick = () => { if (open) { curSector = i; buildLevels(); show('levels'); AU.theme(secTheme(i)); } else toast(s.soon ? T('sec.soonToast') : '🔒 ' + CAT.lockText(s), 1300); }; $('secList').appendChild(d);
   }
+  { const o = $('xEntry'); if (o) o.remove(); const n = $('xOpenNote'); if (n) n.remove(); if (window.BHExp) { const e = BHExp.entryCard(); $('secList').after(e); const t = document.createElement('small'); t.id = 'xOpenNote'; t.textContent = '🔓 ' + BHExp.tx('open'); e.after(t); } } // v3.4.0 L51 prototype entry
   $('secPager').style.display = pages > 1 ? 'flex' : 'none'; $('sPage').textContent = `${secPage + 1} / ${pages}`;
   $('sDots').innerHTML = pages <= 12 ? Array.from({ length: pages }, (_, k) => `<i class="${k === secPage ? 'on' : ''}" data-p="${k}"></i>`).join('') : '';
   $('sDots').querySelectorAll('i').forEach(e => e.onclick = () => { secPage = +e.dataset.p; buildSectors(); });
@@ -1119,6 +1121,7 @@ function buildLevels() {
     b.className = 'lv' + (lock ? ' lock' : '') + (LEVELS[i].boss ? ' boss' : ''); b.innerHTML = `${lock ? '🔒' : LEVELS[i].boss ? '☠' : i + 1}<span>${'★'.repeat(st)}${'☆'.repeat(3 - st)}</span>`;
     b.onclick = () => { if (!lock) startLevel(i); }; $('grid').appendChild(b);
   }
+  { const o = $('xTileBox'); if (o) o.remove(); if (window.BHExp && curSector === CAT.real[CAT.real.length - 1].k) { const d = document.createElement('div'); d.id = 'xTileBox'; d.className = 'grid'; const b = document.createElement('button'); b.className = 'lv xTile'; b.innerHTML = `51<span>🧪 ${BHExp.tx('name')}</span>`; b.onclick = () => BHExp.start(); d.appendChild(b); $('grid').after(d); } }
 }
 const secTheme = si => { const s = SECTORS[si] || SECTORS[0]; return AU.THEMES[s.id] ? s.id : AU.THEME_IDS[s.pal % 5]; };
 function toMenu() { resetInput(); ensureBG(5); state = 'menu'; AU.theme('menu'); L = null; ship = null; camWY = 0; Z = 1; camCX = 180; camCY = 320; AU.aimEnd(); persist();
@@ -1160,6 +1163,7 @@ function buildCodex() { const ids = CAT.idOf.filter(id => FACTS[id]), got = ids.
     for (const id of list) { const f = I18N.fact(id), u = save.facts[id];
       h += u ? `<div class="cx got" data-id="${id}">${u.s3 ? '<span class="st3">★★★</span>' : ''}<small>${T('codex.level', { n: f.n })}${f.boss ? ' · ' + T('fact.boss') : ''}</small><b>${f.title}</b><p>${f.text}</p><div class="fsrc">${T('fact.src', { s: f.src })}${u.s3 ? '' : '<br>' + T('fact.starHint')}</div></div>`
         : `<div class="cx lock"><small>${T('codex.level', { n: f.n })}</small><b>🔒 ???</b><small>${T('codex.locked', { n: f.n })}</small></div>`; } }
+  if (FACTS['expedition-01'] && window.BHExp) { const f = I18N.fact('expedition-01'), u = save.facts['expedition-01']; h += `<div class="cxh">51. 🧪 ${BHExp.tx('name')}</div>` + (u ? `<div class="cx got" data-id="expedition-01"><small>${T('codex.level', { n: 51 })}</small><b>${f.title}</b><p>${f.text}</p><div class="fsrc">${T('fact.src', { s: f.src })}</div></div>` : `<div class="cx lock"><small>${T('codex.level', { n: 51 })}</small><b>🔒 ???</b><small>${T('codex.locked', { n: 51 })}</small></div>`); }
   $('cxList').innerHTML = h; $('cxList').querySelectorAll('.cx.got').forEach(e => e.onclick = () => e.classList.toggle('open')); }
 $('bCodex').onclick = () => { buildCodex(); show('codex'); }; $('bCxBack').onclick = toMenu;
 function applyLang() { I18N.apply(); document.querySelectorAll('#langSeg button').forEach(b => b.classList.toggle('on', b.dataset.l === I18N.lang)); }
