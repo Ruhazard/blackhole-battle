@@ -1,4 +1,4 @@
-/* Blackhole Battle v3.4.0 — stage 2: visuals, sound, progress (gameplay/physics unchanged from v3.0) */
+/* Blackhole Battle v3.4.1 — stage 2: visuals, sound, progress (gameplay/physics unchanged from v3.0) */
 (() => {
 'use strict';
 const S = window.BHSim;
@@ -1114,7 +1114,7 @@ function buildSectors() {
 }
 $('sPrev').onclick = () => { secPage--; buildSectors(); }; $('sNext').onclick = () => { secPage++; buildSectors(); };
 { let sx = null; $('secList').addEventListener('touchstart', e => { sx = e.touches[0].clientX; }, { passive: true }); $('secList').addEventListener('touchend', e => { if (sx == null) return; const dx = e.changedTouches[0].clientX - sx; sx = null; if (Math.abs(dx) > 60) { secPage += dx < 0 ? 1 : -1; buildSectors(); } }); }
-function buildLevels() {
+function buildLevels() { $("bBack2").textContent = I18N.t("backSectors"); // 3.4.1: always localized
   const s = SECTORS[curSector]; $('secTitle').textContent = `${curSector + 1}. ${I18N.secName(s)}`; $('grid').innerHTML = '';
   for (const i of s.idx) {
     const b = document.createElement('button'); const lock = !isOpen(i); const st = (bestOf(i) || {}).s || 0;

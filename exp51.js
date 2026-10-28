@@ -1,4 +1,4 @@
-/* Blackhole Battle v3.4.0 — Level 51 "Expedition" (prototype mode).
+/* Blackhole Battle v3.4.1 — Level 51 "Expedition" (prototype mode).
    Separate from levels 1–50: own simulation (sim51.js), own WebGL renderer (gl51.js), this file = mode UI/camera/controls/FX.
    Controls: slingshot launch while docked; left side = floating joystick (wanted nose heading, RCS turns the ship),
    right edge = throttle lever (stays where you leave it); ⇄ magnet polarity; ↺ back to checkpoint; ⏸ pause. */
@@ -6,10 +6,11 @@ window.BHExp = (() => {
   'use strict';
   const S51 = window.BHSim51, GL = window.BHGl51, K = S51.K, TAU = Math.PI * 2, $ = id => document.getElementById(id);
   const TX = {
-    uk: { name: 'Експедиція', tag: 'Прототип · рівень 51', card: 'Довга подорож: дросель, джойстик, паливо, контрольні точки', fuel: 'Паливо', hull: 'Корпус', cp: 'Ворота', spd: 'шв.',
+    uk: { name: 'Експедиція', tag: 'Прототип · рівень 51', card: 'Довга подорож: керування одним пальцем, гальмо, паливо, ворота', fuel: 'Паливо', hull: 'Корпус', cp: 'Ворота', spd: 'шв.',
       launch: 'Потягни назад, щоб стартувати (як рогатка)', launchD: 'Потягни туди, куди летіти, і відпусти',
-      t0: '🕹 Ліворуч — джойстик: куди показуєш, туди розвертається ніс. Праворуч — важіль тяги: підніми, щоб розганятися. Корабель важкий — гальмуй заздалегідь, розвернувши ніс назад.',
-      t1: '🪨 Пояс астероїдів: шукай проходи й скинь швидкість. Удар швидше ~55 пошкоджує корпус.',
+      t0: '👆 Тягни пальцем будь-де: ніс розвертається туди, а що далі тягнеш — то сильніша тяга. Відпустив — летиш за інерцією.',
+      t1: '⏹ Тримай ГАЛЬМО — корабель сам скине швидкість (подвійний дотик — повна зупинка). Попереду астероїди: удар швидше ~55 б’є корпус.',
+      t0c: '🕹 Ліворуч — джойстик: куди показуєш, туди розвертається ніс. Праворуч — важіль тяги: підніми, щоб розганятися. Корабель важкий — гальмуй заздалегідь, розвернувши ніс назад.',
       t2: '🌍 Гравітаційний маневр: пройди повз чорну діру — вона закрутить тебе вгору. Не зачепи місяці планети!',
       t3: '🧲 Бар’єри пропускають лише свій колір. Тисни ⇄, щоб змінити полярність. ☀ Спалах — дочекайся, поки згасне.',
       t4: '🌀 Кротова нора закине тебе на верхній ряд.',
@@ -18,11 +19,12 @@ window.BHExp = (() => {
       d_hull: 'Корпус зруйновано', d_planet: 'Удар об планету', d_moon: 'Зіткнення з місяцем', d_hole: 'Горизонт подій', d_flare: 'Згорів у спалаху',
       respawn: 'Повернення до воріт…', gate: 'Ворота {n}/{m}', fuelUp: '+паливо', empty: 'Паливо скінчилося — лишилися тільки слабкі маневрові двигуни', fast: 'Занадто швидко для порталу!',
       win: 'Експедицію завершено!', time: 'Час', deaths: 'Втрати', left: 'Паливо в баку', best: 'Рекорд', again: '↻ Ще раз', menu: '☰ Меню', resume: '▶ Далі', restart: '↻ Спочатку', paused: 'Пауза',
-      open: 'Тестова збірка 3.4.0: усі рівні 1–51 відкриті' },
-    en: { name: 'Expedition', tag: 'Prototype · level 51', card: 'A long journey: throttle, joystick, fuel, checkpoints', fuel: 'Fuel', hull: 'Hull', cp: 'Gates', spd: 'spd',
+      open: 'Тестова збірка 3.4.1: усі рівні 1–51 відкриті', brk: 'ГАЛЬМО', ctl: '🎮 Керування (рівень 51)', ctlF: 'Один палець', ctlC: 'Класичне', ctlNote: 'Один палець: тягни будь-де + кнопка ГАЛЬМО. Класичне: джойстик ліворуч + важіль тяги праворуч.' },
+    en: { name: 'Expedition', tag: 'Prototype · level 51', card: 'A long journey: one-finger flight, brake, fuel, gates', fuel: 'Fuel', hull: 'Hull', cp: 'Gates', spd: 'spd',
       launch: 'Pull back to launch (slingshot)', launchD: 'Drag where you want to fly and release',
-      t0: '🕹 Left side is the joystick: the nose turns where you point. Right side is the throttle lever: push it up to accelerate. The ship is heavy, so brake early by turning the nose backwards.',
-      t1: '🪨 Asteroid belt: find the gaps and slow down. Hits faster than ~55 damage the hull.',
+      t0: '👆 Drag anywhere: the nose turns that way, and the further you drag, the harder it thrusts. Let go to coast.',
+      t1: '⏹ Hold BRAKE and the ship kills its speed by itself (double-tap = full stop). Asteroids ahead: hits faster than ~55 damage the hull.',
+      t0c: '🕹 Left side is the joystick: the nose turns where you point. Right side is the throttle lever: push it up to accelerate. The ship is heavy, so brake early by turning the nose backwards.',
       t2: '🌍 Gravity assist: skim past the black hole and let it swing you upwards. Avoid the planet’s moons!',
       t3: '🧲 Barriers only let their own colour through. Tap ⇄ to switch polarity. ☀ Flare: wait for it to die down.',
       t4: '🌀 The wormhole throws you up to the top row.',
@@ -31,11 +33,12 @@ window.BHExp = (() => {
       d_hull: 'Hull destroyed', d_planet: 'Crashed into the planet', d_moon: 'Hit a moon', d_hole: 'Crossed the event horizon', d_flare: 'Burned in a flare',
       respawn: 'Back to the gate…', gate: 'Gate {n}/{m}', fuelUp: '+fuel', empty: 'Out of fuel: only weak thrusters left', fast: 'Too fast for the portal!',
       win: 'Expedition complete!', time: 'Time', deaths: 'Losses', left: 'Fuel left', best: 'Best', again: '↻ Again', menu: '☰ Menu', resume: '▶ Resume', restart: '↻ Restart', paused: 'Paused',
-      open: 'Test build 3.4.0: all levels 1–51 unlocked' },
-    es: { name: 'Expedición', tag: 'Prototipo · nivel 51', card: 'Un largo viaje: acelerador, joystick, combustible, puntos de control', fuel: 'Combustible', hull: 'Casco', cp: 'Puertas', spd: 'vel.',
+      open: 'Test build 3.4.1: all levels 1–51 unlocked', brk: 'BRAKE', ctl: '🎮 Controls (level 51)', ctlF: 'One finger', ctlC: 'Classic', ctlNote: 'One finger: drag anywhere + BRAKE button. Classic: joystick on the left + throttle lever on the right.' },
+    es: { name: 'Expedición', tag: 'Prototipo · nivel 51', card: 'Un largo viaje: control con un dedo, freno, combustible, puertas', fuel: 'Combustible', hull: 'Casco', cp: 'Puertas', spd: 'vel.',
       launch: 'Tira hacia atrás para despegar (tirachinas)', launchD: 'Arrastra hacia donde quieres volar y suelta',
-      t0: '🕹 A la izquierda, el joystick: el morro gira hacia donde apuntas. A la derecha, la palanca de empuje: súbela para acelerar. La nave es pesada: frena con tiempo girando el morro hacia atrás.',
-      t1: '🪨 Cinturón de asteroides: busca los huecos y baja la velocidad. Los golpes a más de ~55 dañan el casco.',
+      t0: '👆 Arrastra en cualquier sitio: el morro gira hacia allí y, cuanto más arrastras, más empuje. Suelta para planear.',
+      t1: '⏹ Mantén FRENO y la nave frena sola (doble toque = parada total). Asteroides delante: los golpes a más de ~55 dañan el casco.',
+      t0c: '🕹 A la izquierda, el joystick: el morro gira hacia donde apuntas. A la derecha, la palanca de empuje: súbela para acelerar. La nave es pesada: frena con tiempo girando el morro hacia atrás.',
       t2: '🌍 Asistencia gravitatoria: pasa rozando el agujero negro y deja que te lance hacia arriba. ¡Evita las lunas!',
       t3: '🧲 Las barreras solo dejan pasar su propio color. Toca ⇄ para cambiar la polaridad. ☀ Erupción: espera a que se apague.',
       t4: '🌀 El agujero de gusano te lanza a la fila superior.',
@@ -44,7 +47,7 @@ window.BHExp = (() => {
       d_hull: 'Casco destruido', d_planet: 'Choque con el planeta', d_moon: 'Choque con una luna', d_hole: 'Cruzaste el horizonte de sucesos', d_flare: 'Ardió en una erupción',
       respawn: 'Volviendo a la puerta…', gate: 'Puerta {n}/{m}', fuelUp: '+combustible', empty: 'Sin combustible: solo quedan los propulsores débiles', fast: '¡Demasiado rápido para el portal!',
       win: '¡Expedición completada!', time: 'Tiempo', deaths: 'Pérdidas', left: 'Combustible restante', best: 'Récord', again: '↻ Otra vez', menu: '☰ Menú', resume: '▶ Seguir', restart: '↻ Reiniciar', paused: 'Pausa',
-      open: 'Versión de prueba 3.4.0: todos los niveles 1–51 desbloqueados' } };
+      open: 'Versión de prueba 3.4.1: todos los niveles 1–51 desbloqueados', brk: 'FRENO', ctl: '🎮 Controles (nivel 51)', ctlF: 'Un dedo', ctlC: 'Clásico', ctlNote: 'Un dedo: arrastra en cualquier sitio + botón FRENO. Clásico: joystick a la izquierda + palanca de empuje a la derecha.' } };
   const FACT = { n: 51, src: 'NASA Science — Voyager: Planetary Voyage', url: 'https://science.nasa.gov/mission/voyager/planetary-voyage/',
     uk: ['Гравітаційний маневр', 'Voyager 2 стартував у 1977 році й пролетів повз Юпітер, Сатурн та Уран. Кожна планета викривляла його траєкторію й додавала швидкості. Завдяки цим «гравітаційним маневрам» політ до Нептуна тривав 12 років замість 30. Таке розташування планет трапляється приблизно раз на 175 років.'],
     en: ['Gravity assist', 'Voyager 2 launched in 1977 and flew past Jupiter, Saturn and Uranus. Each flyby bent its path and added speed. These “gravity assists” cut the trip to Neptune from 30 years to 12. The planetary alignment that made this possible occurs about once every 175 years.'],
@@ -61,7 +64,9 @@ window.BHExp = (() => {
   let root = null, glc, cv, ctx, glOK = false, active = false, paused = false, frozen = false, raf = 0, lastT = 0, acc = 0, rt = 0;
   let M = null, s = null, bodies = [], moonB = [], deadT = 0, auto = null, autoOn = false, tipShown = {}, tipT = 0, toastT = 0, winShown = false;
   let W = 360, H = 640, DPR = 1, gdpr = 1, q = 2, camX = 0, camY = 0, viewW = 430, S = 1;
-  const inp = { head: null, turn: 0, thr: 0, flip: false }, keys = {};
+  const inp = { head: null, turn: 0, thr: 0, flip: false, dir: null, k: 0, brake: false }, keys = {};
+  let fin = null, brkHeld = false, brkLatch = false, brkDownT = -9, tipLo = false;
+  const classic = () => { try { return SV().set.l51ctl === 'classic'; } catch (e) { return false; } };
   let joy = null, lever = null, aim = null, thrSet = 0, holdHead = null;
   let parts = []; const PMAX = 520;
   const perf = { n: 0, dts: [], rms: [], drawn: 0 };
@@ -74,10 +79,14 @@ window.BHExp = (() => {
 #xHud .xb{width:84px}#xHud .xb i{display:block;height:6px;margin-top:3px;border-radius:3px;background:rgba(255,255,255,.14);overflow:hidden}#xHud .xb i b{display:block;height:100%;width:100%;border-radius:3px;transition:width .15s}
 #xHud .xv{min-width:54px}#xHud .xv u{display:block;text-decoration:none;font-size:15px;color:#fff;font-variant-numeric:tabular-nums}
 .xbtn{position:absolute;width:46px;height:46px;border-radius:50%;border:1px solid rgba(255,255,255,.28);background:rgba(15,23,42,.55);color:#fff;font-size:20px;line-height:44px;text-align:center;padding:0;-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);touch-action:none}
-.xbtn:active{transform:scale(.93)}#xPause{left:10px;top:calc(env(safe-area-inset-top) + 100px)}#xRe{left:62px;top:calc(env(safe-area-inset-top) + 100px)}
-#xPol{right:12px;bottom:calc(env(safe-area-inset-bottom) + 318px);width:52px;height:52px;line-height:50px;font-size:22px}
-#xTip{position:absolute;left:12px;right:12px;top:calc(env(safe-area-inset-top) + 156px);margin:0 auto;max-width:420px;padding:9px 12px;border-radius:14px;background:rgba(15,23,42,.72);border:1px solid rgba(167,139,250,.45);color:#e9e7ff;font-size:13.5px;line-height:1.35;pointer-events:none;opacity:0;transition:opacity .35s;-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px)}
-#xTip.on{opacity:1}#xToast{position:absolute;left:0;right:0;top:38%;text-align:center;color:#fff;font-size:22px;font-weight:800;text-shadow:0 2px 12px #000,0 0 18px rgba(167,139,250,.8);pointer-events:none;opacity:0;transition:opacity .25s}#xToast.on{opacity:1}
+.xbtn:active{transform:scale(.93)}#xPause{left:10px;top:calc(env(safe-area-inset-top) + 100px);width:50px;height:50px;line-height:48px}#xRe{left:68px;top:calc(env(safe-area-inset-top) + 100px);width:50px;height:50px;line-height:48px;font-size:24px}
+#xPol{right:30px;bottom:calc(env(safe-area-inset-bottom) + 130px);width:62px;height:62px;line-height:60px;font-size:26px}
+#xBrk{right:14px;bottom:calc(env(safe-area-inset-bottom) + 18px);width:96px;height:96px;line-height:1.1;font-size:30px;background:rgba(127,29,29,.55);border:2px solid rgba(252,165,165,.6);display:flex;flex-direction:column;align-items:center;justify-content:center}
+#xBrk span{font-size:11.5px;font-weight:800;letter-spacing:.04em;margin-top:2px}#xBrk.on{background:rgba(220,38,38,.8);border-color:#fecaca;box-shadow:0 0 22px rgba(248,113,113,.7)}#xBrk.latch{box-shadow:0 0 0 4px rgba(254,202,202,.55),0 0 22px rgba(248,113,113,.7)}
+#exp.classic #xBrk{right:84px;width:80px;height:80px;font-size:24px}#exp.classic #xPol{right:96px;bottom:calc(env(safe-area-inset-bottom) + 112px);width:56px;height:56px;line-height:54px}
+#xCtl{margin:10px 0 4px}#xCtl small{display:block;color:#c4b5fd;margin-bottom:4px}#xCtl button{padding:7px 12px;font-size:13px;background:rgba(255,255,255,.08)}#xCtl button.on{background:rgba(124,58,237,.75)}
+#xTip{position:absolute;left:12px;right:12px;top:calc(env(safe-area-inset-top) + 160px);margin:0 auto;max-width:420px;padding:9px 12px;border-radius:14px;background:rgba(15,23,42,.72);border:1px solid rgba(167,139,250,.45);color:#e9e7ff;font-size:13.5px;line-height:1.35;pointer-events:none;opacity:0;transition:opacity .35s;-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px)}
+#xTip.on{opacity:1}#xTip.lo{top:auto;bottom:calc(env(safe-area-inset-bottom) + 200px)}@media (orientation:landscape){#xTip.lo{bottom:calc(env(safe-area-inset-bottom) + 14px);right:130px;left:130px}}#xToast{position:absolute;left:0;right:0;top:38%;text-align:center;color:#fff;font-size:22px;font-weight:800;text-shadow:0 2px 12px #000,0 0 18px rgba(167,139,250,.8);pointer-events:none;opacity:0;transition:opacity .25s}#xToast.on{opacity:1}
 .xp{position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:rgba(2,6,23,.62);padding:16px}.xp.on{display:flex}
 .xcard{width:min(360px,94%);max-height:88%;overflow:auto;padding:18px 16px;border-radius:20px;background:linear-gradient(160deg,rgba(49,46,129,.85),rgba(15,23,42,.92));border:1px solid rgba(167,139,250,.5);color:#e2e8f0;text-align:center;box-shadow:0 10px 40px rgba(0,0,0,.6)}
 .xcard h2{margin:2px 0 10px;font-size:22px;color:#fff}.xcard .xs{display:flex;justify-content:space-around;margin:8px 0 12px}.xcard .xs b{display:block;font-size:20px;color:#fff}.xcard .xs small{color:#c4b5fd}
@@ -94,15 +103,20 @@ window.BHExp = (() => {
     root.innerHTML = `<canvas id="xgl"></canvas><canvas id="xc"></canvas>
 <div id="xHud"><div class="xb"><span id="xFuelL"></span> <span id="xFuelN"></span><i><b id="xFuel"></b></i></div><div class="xb"><span id="xHullL"></span> <span id="xHullN"></span><i><b id="xHull" style="background:#4ade80"></b></i></div>
 <div class="xv"><span id="xCpL"></span><u id="xCp">0/6</u></div><div class="xv"><span>⏱</span><u id="xTime">0:00</u></div><div class="xv"><span id="xSpL"></span><u id="xSp">0</u></div></div>
-<button class="xbtn" id="xPause" aria-label="pause">⏸</button><button class="xbtn" id="xRe" aria-label="respawn">↺</button><button class="xbtn" id="xPol" aria-label="polarity">⇄</button>
+<button class="xbtn" id="xPause" aria-label="pause">⏸</button><button class="xbtn" id="xRe" aria-label="respawn">↺</button><button class="xbtn" id="xPol" aria-label="polarity">⇄</button><button class="xbtn" id="xBrk" aria-label="brake"><b>⏹</b><span id="xBrkL"></span></button>
 <div id="xTip"></div><div id="xToast"></div>
-<div class="xp" id="xPP"><div class="xcard"><h2 id="xPT"></h2><button id="xRes"></button><button id="xRst"></button><button id="xExit"></button></div></div>
+<div class="xp" id="xPP"><div class="xcard"><h2 id="xPT"></h2><button id="xRes"></button><button id="xRst"></button><button id="xExit"></button><div id="xCtl"><small id="xCtlL"></small><button data-c="finger" id="xCtlF"></button><button data-c="classic" id="xCtlC"></button></div></div></div>
 <div class="xp" id="xWin"><div class="xcard"><h2 id="xWT"></h2><div class="xs"><div><b id="xWTime"></b><small id="xWTimeL"></small></div><div><b id="xWD"></b><small id="xWDL"></small></div><div><b id="xWF"></b><small id="xWFL"></small></div></div>
 <div id="xWBest" style="color:#fde68a;margin-bottom:8px"></div><div class="xf" id="xWFact"></div><button id="xAgain"></button><button id="xWMenu"></button></div></div>`;
     document.body.appendChild(root); glc = $('xgl'); cv = $('xc'); ctx = cv.getContext('2d');
     glOK = !!(GL && !/[?&]nogl/.test(location.search) && GL.init(glc));
     const stop = e => { e.stopPropagation(); };
     for (const id of ['xPause', 'xRe', 'xPol']) { $(id).addEventListener('pointerdown', stop); }
+    const B = $('xBrk'), bOff = e => { if (e && e.pointerId != null && B._pid != null && e.pointerId !== B._pid) return; B._pid = null; brkHeld = false; };
+    B.addEventListener('pointerdown', e => { e.stopPropagation(); e.preventDefault(); if (!active || paused || !s || s.docked || !s.alive) return; try { B.setPointerCapture(e.pointerId); } catch (er) { }
+      B._pid = e.pointerId; const tn = performance.now() / 1000; if (brkLatch) brkLatch = false; else if (tn - brkDownT < .4) brkLatch = true; brkDownT = tn; brkHeld = true; vib(12); });
+    for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) B.addEventListener(ev, bOff); B.addEventListener('contextmenu', e => e.preventDefault());
+    for (const b of root.querySelectorAll('#xCtl button')) b.onclick = () => setCtl(b.dataset.c);
     $('xPause').onclick = () => setPause(true); $('xRes').onclick = () => setPause(false); $('xRst').onclick = () => { setPause(false); start(); }; $('xExit').onclick = () => exit();
     $('xRe').onclick = () => { if (s && !s.won && !paused) { if (s.alive && !s.docked) { s.alive = false; s.cause = 'manual'; deadT = 1; } } };
     $('xPol').onclick = () => { inp.flip = true; };
@@ -115,43 +129,65 @@ window.BHExp = (() => {
   }
   function labels() {
     $('xFuelL').textContent = tx('fuel'); $('xHullL').textContent = tx('hull'); $('xCpL').textContent = tx('cp'); $('xSpL').textContent = tx('spd');
-    $('xPT').textContent = tx('paused'); $('xRes').textContent = tx('resume'); $('xRst').textContent = tx('restart'); $('xExit').textContent = tx('menu');
+    $('xBrkL').textContent = tx('brk'); $('xCtlL').textContent = tx('ctl'); $('xCtlF').textContent = tx('ctlF'); $('xCtlC').textContent = tx('ctlC'); syncCtl(); $('xPT').textContent = tx('paused'); $('xRes').textContent = tx('resume'); $('xRst').textContent = tx('restart'); $('xExit').textContent = tx('menu');
     $('xAgain').textContent = tx('again'); $('xWMenu').textContent = tx('menu'); $('xWTimeL').textContent = tx('time'); $('xWDL').textContent = tx('deaths'); $('xWFL').textContent = tx('left');
   }
-  function setPause(b) { if (!active || (s && s.won)) return; paused = !!b; $('xPP').classList.toggle('on', paused); if (paused) { joy = lever = aim = null; au('drive', { on: false }); } else lastT = performance.now(); }
-  function tip(k) { if (tipShown[k]) return; tipShown[k] = 1; const el = $('xTip'); el.textContent = tx(k); el.classList.add('on'); tipT = k === 't0' ? 9 : 6.5; }
+  function syncCtl() { const c = classic(); if (root) { root.classList.toggle('classic', c); for (const b of root.querySelectorAll('#xCtl button')) b.classList.toggle('on', (b.dataset.c === 'classic') === c); }
+    for (const b of document.querySelectorAll('#xCtlSeg button')) b.classList.toggle('on', (b.dataset.c === 'classic') === c); }
+  function setCtl(v) { try { SV().set.l51ctl = v === 'classic' ? 'classic' : 'finger'; BH().persist(); } catch (e) { } fin = joy = lever = null; thrSet = 0; excl = null; syncCtl(); }
+  // inject the option into the main Settings screen (no game3/index edits needed)
+  function settingsRow() { const a = document.getElementById('aimSeg'); if (!a || document.getElementById('xCtlSeg')) return; const host = a.closest('.set') || a.parentNode;
+    const d = document.createElement('div'); d.className = 'set wrap'; d.id = 'xCtlRow'; d.innerHTML = '<span id="xCtlRowL"></span><div class="seg" id="xCtlSeg"><button data-c="finger"></button><button data-c="classic"></button></div><div class="small setnote" id="xCtlRowN"></div>';
+    host.parentNode.insertBefore(d, host.nextSibling); for (const b of d.querySelectorAll('button')) b.onclick = () => { setCtl(b.dataset.c); try { BH().HAP && BH().HAP.tick(); } catch (e) { } }; ctlLabels(); }
+  function ctlLabels() { const r = document.getElementById('xCtlRow'); if (!r) return; $('xCtlRowL').textContent = tx('ctl'); $('xCtlRowN').textContent = tx('ctlNote'); const bs = r.querySelectorAll('button'); bs[0].textContent = tx('ctlF'); bs[1].textContent = tx('ctlC'); syncCtl(); }
+  function setPause(b) { if (!active || (s && s.won)) return; paused = !!b; $('xPP').classList.toggle('on', paused); if (paused) { joy = lever = aim = fin = null; brkHeld = brkLatch = false; au('drive', { on: false }); } else lastT = performance.now(); }
+  function tip(k) { if (tipShown[k]) return; tipShown[k] = 1; const el = $('xTip'); el.textContent = tx(k); el.classList.remove('lo'); hudT = 0; el.classList.add('on'); tipT = k === 't0' || k === 't1' ? 9 : 6.5; }
   function toast(t, d) { const el = $('xToast'); el.textContent = t; el.classList.add('on'); toastT = d || 1.6; }
 
-  // ------------------------------------------------------------------ input (multi-touch: aim | joystick | throttle lever)
-  const JR = 58, LEV = () => ({ x: W - 44, y1: H - 96 - safeB(), h: Math.min(210, H * .3) });
+  // ------------------------------------------------------------------ input
+  // default (3.4.1): ONE finger anywhere = floating stick measured from the touch-down point -> nose direction + thrust by drag length
+  //                  (engine only fires within ~30deg of that direction, sim51 gate); BRAKE button (DOM, own pointer) = autopilot velocity kill.
+  // classic (setting): left joystick (nose) + right throttle lever, as in 3.4.0. Brake button works in both.
+  const JR = 58, LEV = () => ({ x: W - 40, y1: H - 40 - safeB(), h: Math.min(210, H * .3) });
+  const FDEAD = 14, FMAX = () => Math.max(80, Math.min(130, Math.min(W, H) * .25));
   let safeBv = 0; const safeB = () => safeBv;
   function pDown(e) {
     if (!active || paused || !s || s.won) return; const x = e.clientX, y = e.clientY; try { cv.setPointerCapture(e.pointerId); } catch (er) { }
     if (s.docked && s.alive) { if (!aim) aim = { id: e.pointerId, x0: x, y0: y, x, y }; return; }
     if (!s.alive) return;
+    if (!classic()) { if (!fin) { fin = { id: e.pointerId, bx: x, by: y, x, y }; if (brkLatch && !brkHeld) brkLatch = false; } return; }
     const L = LEV();
     if (x >= W * .62) { if (!lever) { lever = { id: e.pointerId, y0: y, v0: thrSet }; if (Math.abs(x - L.x) < 34 && y < L.y1 + 20 && y > L.y1 - L.h - 20) { thrSet = Math.max(0, Math.min(1, (L.y1 - y) / L.h)); lever.v0 = thrSet; } } return; }
     if (!joy) joy = { id: e.pointerId, bx: x, by: y, x, y };
   }
   function pMove(e) { const x = e.clientX, y = e.clientY;
     if (aim && aim.id === e.pointerId) { aim.x = x; aim.y = y; return; }
+    if (fin && fin.id === e.pointerId) { fin.x = x; fin.y = y; const dx = x - fin.bx, dy = y - fin.by, d = Math.hypot(dx, dy), R = FMAX() * 1.15; if (d > R) { fin.bx = x - dx / d * R; fin.by = y - dy / d * R; } return; }
     if (lever && lever.id === e.pointerId) { const L = LEV(); thrSet = Math.max(0, Math.min(1, lever.v0 + (lever.y0 - y) / L.h)); return; }
     if (joy && joy.id === e.pointerId) { joy.x = x; joy.y = y; const dx = x - joy.bx, dy = y - joy.by, d = Math.hypot(dx, dy); if (d > JR * 1.5) { joy.bx = x - dx / d * JR * 1.5; joy.by = y - dy / d * JR * 1.5; } } }
   function pUp(e) {
     if (aim && aim.id === e.pointerId) { const a = aim; aim = null; if (!active || paused || !s || !s.docked) return; const dx = a.x - a.x0, dy = a.y - a.y0, d = Math.hypot(dx, dy); if (d < 14) return;
       const sling = (SV().set.aim || 'sling') !== 'direct', ang = sling ? Math.atan2(-dy, -dx) : Math.atan2(dy, dx); launchNow(ang, Math.min(1, d / pullMax())); return; }
+    if (fin && fin.id === e.pointerId) fin = null;
     if (lever && lever.id === e.pointerId) lever = null;
     if (joy && joy.id === e.pointerId) joy = null; }
+  // finger vector -> {dir, k}; also used by the test API (virtual finger)
+  function finVec() { if (!fin) return null; const dx = fin.x - fin.bx, dy = fin.y - fin.by, d = Math.hypot(dx, dy); if (d < FDEAD) return { dir: null, k: 0, d };
+    return { dir: Math.atan2(dy, dx), k: Math.min(1, (d - FDEAD) / (FMAX() - FDEAD)), d }; }
   const pullMax = () => Math.min(W, H) * .36;
   function launchNow(ang, k) { if (!s || !s.docked) return; S51.launch(s, ang, k); au('launch', 30 + k * 70); launchT = rt; vib(25); thrSet = 0;
     const ca = Math.cos(ang), sa = Math.sin(ang); for (let i = 0; i < 18; i++) { const j = (Math.random() - .5) * 1.2, v = 30 + Math.random() * 60; pn(s.x - ca * 12, s.y - sa * 12, s.vx * .2 - Math.cos(ang + j) * v, s.vy * .2 - Math.sin(ang + j) * v, .9 + Math.random() * .6, 3 + Math.random() * 3, 0); } }
   let launchT = -9;
   function readInput(dt) {
-    let turn = (keys.ArrowRight || keys.KeyD ? 1 : 0) - (keys.ArrowLeft || keys.KeyA ? 1 : 0), tk = (keys.ArrowUp || keys.KeyW ? 1 : 0) - (keys.ArrowDown || keys.KeyS ? 1 : 0);
-    if (tk) thrSet = Math.max(0, Math.min(1, thrSet + tk * dt * 1.1));
-    inp.turn = turn; inp.head = null;
-    if (joy) { const dx = joy.x - joy.bx, dy = joy.y - joy.by; if (Math.hypot(dx, dy) > 10) inp.head = Math.atan2(dy, dx); }
-    if (turn) inp.head = null; inp.thr = thrSet; }
+    let kx = (keys.ArrowRight || keys.KeyD ? 1 : 0) - (keys.ArrowLeft || keys.KeyA ? 1 : 0), ky = (keys.ArrowDown || keys.KeyS ? 1 : 0) - (keys.ArrowUp || keys.KeyW ? 1 : 0);
+    inp.head = null; inp.turn = 0; inp.thr = 0; inp.dir = null; inp.k = 0;
+    if (brkLatch && s && (s.docked || !s.alive || Math.hypot(s.vx, s.vy) < .8)) brkLatch = false;
+    inp.brake = !!(brkHeld || brkLatch || keys.KeyB || keys.ShiftLeft || keys.ShiftRight); 
+    if (classic()) { const tk = -ky; if (tk) thrSet = Math.max(0, Math.min(1, thrSet + tk * dt * 1.1)); inp.turn = kx;
+      if (joy) { const dx = joy.x - joy.bx, dy = joy.y - joy.by; if (Math.hypot(dx, dy) > 10) inp.head = Math.atan2(dy, dx); }
+      if (kx) inp.head = null; inp.thr = thrSet; return; }
+    const f = finVec(); if (f && f.dir != null) { inp.dir = f.dir; inp.k = f.k; }
+    if (kx || ky) { inp.dir = Math.atan2(ky, kx); inp.k = 1; } }
 
   // ------------------------------------------------------------------ particles (world space)
   function pn(x, y, vx, vy, life, r, kind, col) { if (parts.length >= PMAX) parts.shift(); const p = { x, y, vx, vy, l: life, l0: life, r, k: kind, c: col || null }; parts.push(p); return p; }
@@ -166,6 +202,9 @@ window.BHExp = (() => {
     if (s.rcs > .14) { const sg = s.rcsSide, n = s.rcs * 40 * dt * qf; for (let i = 0; i < n || Math.random() < n - i; i++) {
       const [nx, ny] = Wp(11, -2.8 * sg), [tx, ty] = Wp(-9.5, 2.8 * sg), v = 50 + Math.random() * 40, ox = -sa * sg, oy = ca * sg;
       pn(nx, ny, s.vx - ox * v, s.vy - oy * v, .35 + Math.random() * .25, 1.3 + Math.random(), 2); pn(tx, ty, s.vx + ox * v, s.vy + oy * v, .35 + Math.random() * .25, 1.3 + Math.random(), 2); } }
+    // brake: 'reverse thrusters' (RCS translation) puffs, opposite to the commanded push
+    if (s.rcsT > .05) { const n = s.rcsT * 50 * dt * qf, sp = Math.hypot(s.vx, s.vy) || 1, ux = -s.vx / sp, uy = -s.vy / sp; for (let i = 0; i < n || Math.random() < n - i; i++) { const [x, y] = Wp((Math.random() - .5) * 16, (Math.random() - .5) * 8), v = 60 + Math.random() * 40;
+      pn(x, y, s.vx - ux * v, s.vy - uy * v, .3 + Math.random() * .2, 1.3 + Math.random(), 2); } }
     // station-keeping puffs against strong gravity (cosmetic, automatic)
     const g = Math.hypot(s.gx, s.gy); if (g > 26 && Math.random() < Math.min(.6, g / 220) * qf) { const ux = s.gx / g, uy = s.gy / g, lat = -sa * ux + ca * uy, sd = lat > 0 ? 1 : -1, [x, y] = Wp((Math.random() - .5) * 14, 4 * sd), v = 40 + Math.random() * 30;
       pn(x, y, s.vx + (-sa * sd) * v, s.vy + (ca * sd) * v, .3 + Math.random() * .2, 1.1 + Math.random(), 2); }
@@ -175,7 +214,7 @@ window.BHExp = (() => {
 
   // ------------------------------------------------------------------ lifecycle
   function start(opt) {
-    build(); labels(); M = S51.build(); s = S51.newShip(M); s.deaths = 0; parts = []; tipShown = {}; deadT = 0; winShown = false; thrSet = 0; joy = lever = aim = null; paused = false; frozen = false; acc = 0; rt = 0; launchT = -9;
+    build(); labels(); M = S51.build(); s = S51.newShip(M); s.deaths = 0; parts = []; tipShown = {}; deadT = 0; winShown = false; thrSet = 0; joy = lever = aim = fin = null; brkHeld = brkLatch = false; paused = false; frozen = false; acc = 0; rt = 0; launchT = -9;
     autoOn = !!(opt && opt.auto); auto = autoOn ? S51.bot(M) : null; mini = null;
     bodies = M.rocks.map(o => { o.type = o.kind === 'ridge' ? 1 : 0; o.tone = o.kind === 'ridge' ? .35 : (o.seed * 3 % 1) * .6; return o; });
     moonB = []; for (const p of M.planets) { bodies.push({ x: p.x, y: p.y, r: p.r, type: 3, seed: .37, spin: .05, tone: .2 }); for (const m of p.moons) { const b = { x: 0, y: 0, r: m.r, type: 2, seed: .11 + m.d / 1000, spin: .1, tone: .5, p, m }; moonB.push(b); bodies.push(b); } }
@@ -184,22 +223,22 @@ window.BHExp = (() => {
     const sv = SV(); sv.exp = sv.exp || { done: 0, best: 0, runs: 0 }; sv.exp.runs++; try { BH().persist(); } catch (e) { }
     $('xWin').classList.remove('on'); $('xPP').classList.remove('on'); $('xTip').classList.remove('on');
     root.classList.add('on'); active = true; try { BH().show(null); } catch (e) { }
-    tip('t0'); lastT = performance.now(); cancelAnimationFrame(raf); raf = requestAnimationFrame(loop);
+    tip(classic() ? 't0c' : 't0'); lastT = performance.now(); cancelAnimationFrame(raf); raf = requestAnimationFrame(loop);
     if (autoOn) S51.launch(s, -.2, .45);
     return true;
   }
   function exit() { active = false; paused = false; cancelAnimationFrame(raf); au('drive', { on: false }); if (root) root.classList.remove('on');
     try { BH().buildSectors(); BH().show('sectors'); } catch (e) { try { BH().toMenu(); } catch (e2) { } } }
   function simStep() {
-    if (autoOn && auto && s.alive && !s.docked) { const a = auto(s); inp.head = a.head; inp.turn = 0; inp.thr = a.thr; if (a.flip) inp.flip = true; }
+    if (autoOn && auto && s.alive && !s.docked) { const a = auto(s); inp.head = null; inp.turn = 0; inp.thr = 0; inp.dir = a.dir; inp.k = a.k; inp.brake = !!a.brake; if (a.flip) inp.flip = true; }
     const ev = S51.step(M, s, inp, []); inp.flip = false;
     for (const e of ev) onEvent(e);
     if (!s.alive) { deadT += S51.STEP; if (deadT > 1.4) respawn(); }
   }
-  function respawn() { s = S51.respawn(M, s); deadT = 0; thrSet = 0; joy = lever = null; toast(tx('respawn'), 1); if (autoOn) { auto = S51.bot(M, s); const c = s.cp >= 0 ? M.cps[s.cp] : M.start; S51.launch(s, c.a, s.cp >= 0 ? .3 : .45); } }
+  function respawn() { s = S51.respawn(M, s); deadT = 0; thrSet = 0; joy = lever = fin = null; brkLatch = false; toast(tx('respawn'), 1); if (autoOn) { auto = S51.bot(M, s); const c = s.cp >= 0 ? M.cps[s.cp] : M.start; S51.launch(s, c.a, s.cp >= 0 ? .3 : .45); } }
   function onEvent(e) {
     switch (e.e) {
-      case 'die': shake = .9; au('crash'); vib([60, 40, 90]); toast(e.cause === 'manual' ? tx('respawn') : tx('d_' + e.cause), 1.6); burst(e.x, e.y, 40, 3, 160, '255,190,90', .8); burst(e.x, e.y, 26, 4, 70, null, 1.6); burst(e.x, e.y, 22, 0, 40, null, 1.6); joy = lever = null; thrSet = 0; break;
+      case 'die': shake = .9; au('crash'); vib([60, 40, 90]); toast(e.cause === 'manual' ? tx('respawn') : tx('d_' + e.cause), 1.6); burst(e.x, e.y, 40, 3, 160, '255,190,90', .8); burst(e.x, e.y, 26, 4, 70, null, 1.6); burst(e.x, e.y, 22, 0, 40, null, 1.6); joy = lever = fin = null; brkLatch = false; thrSet = 0; break;
       case 'hit': if (e.v > 20) { burst(e.x, e.y, Math.min(16, 3 + e.v / 8 | 0), 3, 60 + e.v, '255,220,170', .4); } if (e.dmg > 0) { shake = Math.max(shake, .35); au('bounce'); vib(30); burst(e.x, e.y, 6, 4, 50, null, 1); } else if (e.v > 25) au('bounce'); break;
       case 'fuel': au('key'); toast(tx('fuelUp'), .9); burst(e.x, e.y, 18, 3, 90, '134,239,172', .6); vib(15); break;
       case 'cp': au('star', Math.min(7, e.i + 1)); toast(tx('gate', { n: e.i + 1, m: M.cps.length }), 1.2); burst(e.x, e.y, 30, 3, 120, '250,204,21', .8); vib(30); tip('t' + (e.i + 1)); break;
@@ -228,7 +267,7 @@ window.BHExp = (() => {
     if (tipT > 0 && (tipT -= dt) <= 0) $('xTip').classList.remove('on'); if (toastT > 0 && (toastT -= dt) <= 0) $('xToast').classList.remove('on');
     const r0 = performance.now(); render(dt); const rms = performance.now() - r0; perf.rms.push(rms); if (perf.rms.length > 240) perf.rms.shift();
     autoQ(dt);
-    if (!paused && rt - launchT > .7) au('drive', { on: s.alive && !s.docked && !s.won, thr: s.thr, rcs: Math.max(s.rcs, Math.min(1, Math.hypot(s.gx, s.gy) / 300)), prox: s.prox, pan: Math.max(-1, Math.min(1, (s.x - camX) / (viewW * .5))) });
+    if (!paused && rt - launchT > .7) au('drive', { on: s.alive && !s.docked && !s.won, thr: s.thr, rcs: Math.max(s.rcs, s.rcsT || 0, Math.min(1, Math.hypot(s.gx, s.gy) / 300)), prox: s.prox, pan: Math.max(-1, Math.min(1, (s.x - camX) / (viewW * .5))) });
   }
   // auto quality: drop a tier when the frame interval stays long (GPU-bound phones), never oscillate back up mid-run
   let qT = 0, qN = 0, qS = 0;
@@ -237,14 +276,14 @@ window.BHExp = (() => {
   function setQ(n) { if (n === q) return; q = n; if (glOK) GL.setQuality(n); }
 
   // ------------------------------------------------------------------ rendering
-  let spr = null, hudT = 0, shake = 0, safeT = 0;
+  let spr = null, hudT = 0, shake = 0, safeT = 0, excl = null, brkCls = '', arrowAt = null;
   function sprites() { if (spr) return spr; const mk = (r, g, b) => { const c = document.createElement('canvas'); c.width = c.height = 64; const x = c.getContext('2d'), gr = x.createRadialGradient(32, 32, 0, 32, 32, 32);
     gr.addColorStop(0, `rgba(${r},${g},${b},1)`); gr.addColorStop(.35, `rgba(${r},${g},${b},.55)`); gr.addColorStop(1, `rgba(${r},${g},${b},0)`); x.fillStyle = gr; x.fillRect(0, 0, 64, 64); return c; };
     spr = { w: mk(255, 255, 255), s: mk(150, 150, 162), f: mk(255, 150, 60), y: mk(255, 230, 160) }; return spr; }
   function resize() {
     const w = root.clientWidth || innerWidth, h = root.clientHeight || innerHeight, dpr = Math.min(window.devicePixelRatio || 1, 2), gd = Math.min(window.devicePixelRatio || 1, q === 2 ? 2 : q === 1 ? 1.5 : 1);
     if (w !== W || h !== H || dpr !== DPR || gd !== gdpr || cv.width !== Math.round(w * dpr)) { W = w; H = h; DPR = dpr; gdpr = gd; cv.width = Math.round(W * DPR); cv.height = Math.round(H * DPR); glc.width = Math.round(W * gdpr); glc.height = Math.round(H * gdpr); mini = null;
-      safeBv = Math.max(0, (parseFloat(getComputedStyle($('xPol')).bottom) || 318) - 318); safeT = Math.max(0, (parseFloat(getComputedStyle($('xPause')).top) || 100) - 100); } }
+      safeBv = Math.max(0, (parseFloat(getComputedStyle($('xBrk')).bottom) || 18) - 18); excl = null; safeT = Math.max(0, (parseFloat(getComputedStyle($('xPause')).top) || 100) - 100); } }
   function camera(dt) {
     const sp = Math.hypot(s.vx, s.vy), base = W > H ? 760 : 430, tw = base + Math.min(1, sp / 200) * 90 + (s.docked ? -30 : 0); viewW += (tw - viewW) * (1 - Math.exp(-dt * 1.2)); S = W / viewW; const vh = H / S;
     const cl = (v, m) => Math.max(-m, Math.min(m, v)); let lx = cl(s.vx * .55, viewW * .26), ly = cl(s.vy * .55, vh * .22);
@@ -334,8 +373,8 @@ window.BHExp = (() => {
         c.fillStyle = 'rgba(250,204,21,.95)'; c.beginPath(); c.arc(x + Math.cos(a) * Lx, y + Math.sin(a) * Lx, 5, 0, TAU); c.fill(); c.font = 'bold 13px system-ui'; c.textAlign = 'center'; c.fillText(Math.round(k * 100) + '%', x, y - 34);
         c.strokeStyle = 'rgba(255,255,255,.35)'; c.lineWidth = 2; c.beginPath(); c.arc(aim.x0, aim.y0, 8, 0, TAU); c.moveTo(aim.x0, aim.y0); c.lineTo(aim.x, aim.y); c.stroke(); }
       else { c.fillStyle = `rgba(255,255,255,${.65 + .3 * Math.sin(rt * 3)})`; c.font = '600 15px system-ui'; c.textAlign = 'center'; c.fillText((SV().set.aim || 'sling') !== 'direct' ? tx('launch') : tx('launchD'), W / 2, H - 120 - safeBv); } }
-    // joystick
     if (!s.docked && s.alive) {
+      if (classic()) {
       if (joy) { const dx = joy.x - joy.bx, dy = joy.y - joy.by, d = Math.hypot(dx, dy), m = Math.min(d, JR), kx = joy.bx + (d ? dx / d * m : 0), ky = joy.by + (d ? dy / d * m : 0);
         c.fillStyle = 'rgba(15,23,42,.35)'; c.strokeStyle = 'rgba(255,255,255,.35)'; c.lineWidth = 2; c.beginPath(); c.arc(joy.bx, joy.by, JR, 0, TAU); c.fill(); c.stroke();
         c.fillStyle = 'rgba(167,139,250,.85)'; c.beginPath(); c.arc(kx, ky, 22, 0, TAU); c.fill(); c.strokeStyle = 'rgba(255,255,255,.7)'; c.stroke(); }
@@ -346,14 +385,47 @@ window.BHExp = (() => {
       c.fillStyle = 'rgba(255,255,255,.75)'; c.fillRect(L.x + 11, L.y1 - L.h * s.thr - 1, 5, 2); // actual (spooled) thrust tick
       c.fillStyle = lever ? '#fff' : '#e2e8f0'; c.beginPath(); c.roundRect ? c.roundRect(L.x - 19, fy - 8, 38, 16, 8) : c.rect(L.x - 19, fy - 8, 38, 16); c.fill();
       c.fillStyle = '#0f172a'; c.font = 'bold 10px system-ui'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText(Math.round(thrSet * 100), L.x, fy + .5); c.textBaseline = 'alphabetic';
-      c.fillStyle = 'rgba(255,255,255,.6)'; c.font = '600 10px system-ui'; c.fillText(s.fuel > 0 ? 'THR' : '⛽ 0', L.x, L.y1 + 22); }
+      c.fillStyle = 'rgba(255,255,255,.6)'; c.font = '600 10px system-ui'; c.fillText(s.fuel > 0 ? 'THR' : '⛽ 0', L.x, L.y1 + 22);       } else fingerHud(c);
+      shipHud(c); }
+    const bc = (inp.brake && !s.docked ? 'on' : '') + (brkLatch ? ' latch' : ''); if (bc !== brkCls) { brkCls = bc; const B = $('xBrk'); B.classList.toggle('on', !!inp.brake && !s.docked); B.classList.toggle('latch', brkLatch); }
     minimap(c); edgeArrow(c);
     // DOM HUD (10 Hz)
-    hudT -= dt; if (hudT <= 0) { hudT = .1; const f = Math.max(0, s.fuel), fe = $('xFuel'); fe.style.width = f + '%'; fe.style.background = f < 20 ? '#f87171' : f < 45 ? '#fbbf24' : '#38bdf8'; $('xFuelN').textContent = Math.round(f) + '%';
+    hudT -= dt; if (hudT <= 0) { hudT = .1; tipPlace(); const f = Math.max(0, s.fuel), fe = $('xFuel'); fe.style.width = f + '%'; fe.style.background = f < 20 ? '#f87171' : f < 45 ? '#fbbf24' : '#38bdf8'; $('xFuelN').textContent = Math.round(f) + '%';
       $('xHull').style.width = Math.max(0, s.hull) + '%'; $('xHull').style.background = s.hull < 35 ? '#f87171' : '#4ade80'; $('xHullN').textContent = Math.round(s.hull) + '%';
       $('xCp').textContent = Math.max(0, s.cp + 1) + '/' + M.cps.length; $('xTime').textContent = fmt(s.t).slice(0, -2); $('xSp').textContent = Math.round(Math.hypot(s.vx, s.vy));
       $('xPol').style.background = s.pol > 0 ? 'rgba(220,38,38,.6)' : 'rgba(37,99,235,.6)'; }
   }
+  // one-finger indicator: floating ring at the touch-down point, deadzone, strength arc + flame preview
+  function fingerHud(c) {
+    if (!fin) { if (rt - launchT < 6 && !tipShown.__fh) { const gx = W * .5, gy = H * .62, p = (rt * .8) % 1; c.globalAlpha = .55 * (1 - p); c.strokeStyle = '#fff'; c.lineWidth = 2; c.beginPath(); c.arc(gx, gy, 16 + p * 40, 0, TAU); c.stroke(); c.globalAlpha = 1; } return; }
+    const f = finVec(), R = FMAX(), bx = fin.bx, by = fin.by; tipShown.__fh = 1;
+    c.fillStyle = 'rgba(15,23,42,.22)'; c.strokeStyle = 'rgba(255,255,255,.22)'; c.lineWidth = 1.5; c.beginPath(); c.arc(bx, by, R, 0, TAU); c.fill(); c.stroke();
+    c.strokeStyle = 'rgba(255,255,255,.35)'; c.beginPath(); c.arc(bx, by, FDEAD, 0, TAU); c.stroke();
+    if (f.dir != null) { const ca = Math.cos(f.dir), sa = Math.sin(f.dir), g = gateNow(f.dir), on = s.fuel > 0 ? f.k * g : 0, L = Math.min(f.d, R);
+      c.strokeStyle = 'rgba(167,139,250,.75)'; c.lineWidth = 3; c.beginPath(); c.moveTo(bx + ca * FDEAD, by + sa * FDEAD); c.lineTo(bx + ca * L, by + sa * L); c.stroke();
+      c.strokeStyle = on > .02 ? 'rgba(251,146,60,.95)' : 'rgba(148,163,184,.8)'; c.lineWidth = 5; c.beginPath(); c.arc(bx, by, R, f.dir - f.k * .9, f.dir + f.k * .9); c.stroke();
+      // flame preview: points back from the ring centre; solid when the engine is really burning, ghost while the nose is still turning
+      const fl = 10 + 34 * f.k, fx = bx - ca * 4, fy = by - sa * 4; c.save(); c.translate(fx, fy); c.rotate(f.dir + Math.PI); c.globalAlpha = on > .02 ? .9 : .35;
+      const gr = c.createLinearGradient(0, 0, fl, 0); gr.addColorStop(0, '#fde68a'); gr.addColorStop(.5, '#fb923c'); gr.addColorStop(1, 'rgba(239,68,68,0)'); c.fillStyle = gr; c.beginPath(); c.moveTo(0, -7); c.quadraticCurveTo(fl * .6, -5, fl, 0); c.quadraticCurveTo(fl * .6, 5, 0, 7); c.fill(); c.restore(); c.globalAlpha = 1;
+      c.fillStyle = 'rgba(255,255,255,.9)'; c.font = 'bold 11px system-ui'; c.textAlign = 'center'; c.fillText(s.fuel > 0 ? Math.round(f.k * 100) + '%' : '⛽ 0', bx, by - R - 8); }
+    c.fillStyle = f.dir != null ? 'rgba(196,181,253,.95)' : 'rgba(255,255,255,.6)'; c.strokeStyle = 'rgba(255,255,255,.8)'; c.lineWidth = 1.5; c.beginPath(); c.arc(fin.x, fin.y, 15, 0, TAU); c.fill(); c.stroke(); }
+  const gateNow = a => { const K = S51.K, e = Math.abs(S51.wrap(a - s.ang)); return Math.max(0, Math.min(1, (K.GATE_HI - e) / (K.GATE_HI - K.GATE_LO))); };
+  // around the ship: target heading chevron + turn arc (where the nose is going), brake marker + velocity vector
+  function shipHud(c) {
+    const x = X(s.x), y = Y(s.y), r = Math.max(26, 30 * S);
+    if (inp.dir != null && !inp.brake) { const g = gateNow(inp.dir), d = S51.wrap(inp.dir - s.ang);
+      c.strokeStyle = 'rgba(167,139,250,.55)'; c.lineWidth = 2; c.beginPath(); c.arc(x, y, r, d > 0 ? s.ang : inp.dir, d > 0 ? inp.dir : s.ang); c.stroke();
+      c.save(); c.translate(x + Math.cos(inp.dir) * (r + 6), y + Math.sin(inp.dir) * (r + 6)); c.rotate(inp.dir); c.fillStyle = g > .5 ? 'rgba(251,146,60,.95)' : 'rgba(196,181,253,.9)'; c.beginPath(); c.moveTo(7, 0); c.lineTo(-4, 6); c.lineTo(-1, 0); c.lineTo(-4, -6); c.fill(); c.restore(); }
+    const sp = Math.hypot(s.vx, s.vy);
+    if (inp.brake) { c.strokeStyle = `rgba(248,113,113,${.55 + .3 * Math.sin(rt * 10)})`; c.lineWidth = 2.5; c.setLineDash([5, 5]); c.beginPath(); c.arc(x, y, r + 4, 0, TAU); c.stroke(); c.setLineDash([]);
+      if (sp > 2) { const L = Math.min(70, sp * .5) * Math.max(.6, S); c.strokeStyle = 'rgba(254,202,202,.85)'; c.lineWidth = 2; c.beginPath(); c.moveTo(x, y); c.lineTo(x + s.vx / sp * L, y + s.vy / sp * L); c.stroke(); }
+      c.fillStyle = 'rgba(254,202,202,.95)'; c.font = 'bold 11px system-ui'; c.textAlign = 'center'; c.fillText(sp < 1.5 ? '⏹ 0' : '⏹ ' + Math.round(sp), x, y - r - 10); } }
+  // screen rects the edge arrow and tip must avoid (buttons, minimap)
+  function exclRects() { if (excl) return excl; excl = []; for (const id of ['xPause', 'xRe', 'xPol', 'xBrk']) { const e = $(id); if (!e) continue; const b = e.getBoundingClientRect(); if (b.width) excl.push({ x0: b.left, y0: b.top, x1: b.right, y1: b.bottom }); }
+    const mw = Math.min(124, W * .3), mh = M.H * mw / M.W; excl.push({ x0: W - mw - 10, y0: safeT + 10, x1: W - 10, y1: safeT + 10 + mh }); return excl; }
+  // the tip box must never sit on the ship: flip it between top and bottom slots
+  function tipPlace() { const el = $('xTip'); if (!el.classList.contains('on')) return; const x = X(s.x), y = Y(s.y), b = el.getBoundingClientRect(), P = 36;
+    const hit = x > b.left - P && x < b.right + P && y > b.top - P && y < b.bottom + P; if (hit) { el.classList.toggle('lo'); tipLo = el.classList.contains('lo'); } }
   function minimap(c) {
     const mw = Math.min(124, W * .3), sc = mw / M.W, mh = M.H * sc, x0 = W - mw - 10, y0 = safeT + 10;
     if (!mini) { mini = document.createElement('canvas'); mini.width = Math.round(mw * DPR); mini.height = Math.round(mh * DPR); const m = mini.getContext('2d'); m.scale(DPR * sc, DPR * sc);
@@ -370,18 +442,29 @@ window.BHExp = (() => {
     const vh = H / S; c.strokeStyle = 'rgba(255,255,255,.45)'; c.strokeRect(x0 + (camX - viewW / 2) * sc, y0 + (camY - vh / 2) * sc, viewW * sc, vh * sc);
     c.save(); c.translate(x0 + s.x * sc, y0 + s.y * sc); c.rotate(s.ang); c.fillStyle = '#fff'; c.beginPath(); c.moveTo(5, 0); c.lineTo(-3.5, 3); c.lineTo(-3.5, -3); c.fill(); c.restore(); }
   function edgeArrow(c) {
-    if (!s.alive || s.won) return; const G = S51.nextGoal(M, s), gx = X(G.x), gy = Y(G.y), mL = 26, mT = safeT + 104, mB = H - 70 - safeBv, mR = W - 64;
-    if (gx > mL && gx < mR && gy > mT && gy < mB) return; const cx = W / 2, cy = (mT + mB) / 2, dx = gx - cx, dy = gy - cy;
-    const k = Math.min(dx ? ((dx > 0 ? mR : mL) - cx) / dx : 1e9, dy ? ((dy > 0 ? mB : mT) - cy) / dy : 1e9), ax = cx + dx * k, ay = cy + dy * k, a = Math.atan2(dy, dx), d = Math.hypot(G.x - s.x, G.y - s.y);
+    if (!s.alive || s.won) return; const G = S51.nextGoal(M, s), gx = X(G.x), gy = Y(G.y), mL = 26, mT = safeT + 104, mB = H - 40 - safeBv, mR = W - 26;
+    if (gx > mL && gx < mR && gy > mT && gy < mB) { arrowAt = null; return; } const cx = W / 2, cy = (mT + mB) / 2, dx = gx - cx, dy = gy - cy;
+    const k = Math.min(dx ? ((dx > 0 ? mR : mL) - cx) / dx : 1e9, dy ? ((dy > 0 ? mB : mT) - cy) / dy : 1e9), a = Math.atan2(dy, dx), d = Math.hypot(G.x - s.x, G.y - s.y); let ax = cx + dx * k, ay = cy + dy * k;
+    const side = Math.abs(ax - mL) < 1 || Math.abs(ax - mR) < 1, R = exclRects(), P = 22;
+    const free = (x, y) => x >= mL && x <= mR && y >= mT && y <= mB && !R.some(r => x > r.x0 - P && x < r.x1 + P && y > r.y0 - P && y < r.y1 + P);
+    ax = Math.max(mL, Math.min(mR, ax)); ay = Math.max(mT, Math.min(mB, ay));
+    if (!free(ax, ay)) { let f = null; for (let t = 6; t < 900 && !f; t += 6) for (const sg of [1, -1]) { const x = side ? ax : ax + sg * t, y = side ? ay + sg * t : ay; if (free(x, y)) { f = [x, y]; break; } }
+      if (f) { ax = f[0]; ay = f[1]; } }
+    arrowAt = { x: ax, y: ay };
     const col = s.cp + 1 >= M.cps.length ? '34,211,238' : '250,204,21'; c.save(); c.translate(ax, ay); c.rotate(a); c.fillStyle = `rgba(${col},.92)`; c.beginPath(); c.moveTo(12, 0); c.lineTo(-8, 9); c.lineTo(-4, 0); c.lineTo(-8, -9); c.fill(); c.restore();
     c.fillStyle = `rgba(${col},.95)`; c.font = 'bold 11px system-ui'; c.textAlign = 'center'; c.fillText((d / 100).toFixed(1) + ' km', ax - Math.cos(a) * 42, ay - Math.sin(a) * 22 + 4); }
 
   // ------------------------------------------------------------------ menu entry + test API
   function entryCard() { css(); const el = document.createElement('div'); el.id = 'xEntry'; const ex = (SV().exp || {});
     el.innerHTML = `<em>🧪 51</em><b>🚀 ${tx('name')}</b><small>${tx('tag')} · ${tx('card')}${ex.best ? ' · 🏆 ' + fmt(ex.best) : ''}</small>`; el.onclick = () => start(); return el; }
+  function hook() { css(); settingsRow(); document.addEventListener('click', e => { if (e.target && e.target.closest && e.target.closest('#langSeg,#bSettings')) setTimeout(() => { settingsRow(); ctlLabels(); syncCtl(); if (root) labels(); }, 0); }, true); }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', hook); else hook();
   return {
     start, exit, entryCard, tx, FACT, get active() { return active; }, get ship() { return s; }, get map() { return M; }, get paused() { return paused; }, get gl() { return glOK; }, get quality() { return q; }, setQuality: n => setQ(n),
     get input() { return inp; }, manual: b => { manual = !!b; lastT = performance.now(); }, advance: (dt, n) => { for (let i = 0; i < (n || 1); i++) advance(dt); }, get throttle() { return thrSet; }, setThrottle: v => { thrSet = Math.max(0, Math.min(1, v)); }, launch: (a, k) => launchNow(a, k), freeze: b => { frozen = !!b; }, autopilot: b => { autoOn = !!b; auto = autoOn ? S51.bot(M, s) : null; },
+    finger: (dx, dy) => { if (dx == null) { fin = null; return; } const bx = W / 2, by = H * .6; fin = { id: -7, bx, by, x: bx + dx, y: by + dy }; }, brake: b => { brkHeld = !!b; }, get brakeLatch() { return brkLatch; }, get fingerVec() { return finVec(); },
+    get arrow() { return arrowAt; }, get excl() { return exclRects(); },
+    get controls() { return classic() ? 'classic' : 'finger'; }, setControls: v => setCtl(v),
     stepN(n) { for (let i = 0; i < n && active && !s.won; i++) { if (!autoOn) readInput(S51.STEP); simStep(); } }, get cam() { return { x: camX, y: camY, w: viewW, S }; }, toScreen: (x, y) => [X(x), Y(y)],
     perf() { const a = perf.dts.slice().sort((x, y) => x - y), r = perf.rms.slice().sort((x, y) => x - y), avg = v => v.reduce((p, x) => p + x, 0) / Math.max(1, v.length);
       return { frames: perf.n, dtAvg: avg(a), dtP95: a[Math.floor(a.length * .95)] || 0, renderAvg: avg(r), renderP95: r[Math.floor(r.length * .95)] || 0, drawn: perf.drawn, q, gl: glOK, parts: parts.length }; } };

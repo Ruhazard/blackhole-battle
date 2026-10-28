@@ -1,12 +1,13 @@
-/* Blackhole Battle v3.4.0 — L51 "Expedition" physics (prototype). Deterministic fixed step, no DOM. Separate from sim3.js:
+/* Blackhole Battle v3.4.1 — L51 "Expedition" physics (prototype). Deterministic fixed step, no DOM. Separate from sim3.js:
    levels 1–50 never touch this file. Heavy piloted ship: fuel budget, throttle with spool-up, RCS attitude autopilot with
    angular inertia, gravity wells (+ tidal torque), magnets/barriers, asteroids (bounce + hull damage), moons, flares, wormhole. */
 (function (root) {
   'use strict';
   const STEP = 1 / 120, TAU = Math.PI * 2, SOFT = 300;
   const K = { A_MAX: 95, SPOOL: 0.35, V_SOFT: 230, V_SOFT_K: 1.2, DAMP: 0.04, AMAX: 7, WMAX: 2.4, KP: 3.4, KD: 9,
-    BURN: 2.4, RCS_BURN: 0.25, FUEL0: 100, PICK: 30, SHIP_R: 9, ROCK_E: 0.35, DMG_V: 55, DMG_K: 0.8, PLANET_CRASH_V: 90,
-    LAUNCH_MIN: 40, LAUNCH_MAX: 210, PORTAL_V: 150, CP_R: 58, FUEL_R: 26, WORM_R: 30, EDGE: 40, EDGE_K: 6, RESPAWN_FUEL: 45 };
+    BURN: 2.4, RCS_BURN: 0.25, FUEL0: 100, PICK: 27, SHIP_R: 9, ROCK_E: 0.35, DMG_V: 55, DMG_K: 0.8, PLANET_CRASH_V: 90,
+    LAUNCH_MIN: 40, LAUNCH_MAX: 210, PORTAL_V: 150, CP_R: 58, FUEL_R: 26, WORM_R: 30, EDGE: 40, EDGE_K: 6, RESPAWN_FUEL: 45,
+    GATE_LO: 0.45, GATE_HI: 0.6, BRAKE_TAU: 0.55, BRAKE_VT: 70, RCS_T: 16, RCS_T_BURN: 0.9 };
   function rng(seed) { let a = seed >>> 0; return () => { a = (a + 0x6D2B79F5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
   const segD = (px, py, ax, ay, bx, by) => { const dx = bx - ax, dy = by - ay, l2 = dx * dx + dy * dy, u = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / l2)); return Math.hypot(px - ax - u * dx, py - ay - u * dy); };
   const polyD = (px, py, pl) => { let m = 1e9; for (let i = 0; i + 1 < pl.length; i++) m = Math.min(m, segD(px, py, pl[i][0], pl[i][1], pl[i + 1][0], pl[i + 1][1])); return m; };
@@ -72,14 +73,22 @@
     if (s.docked) { s.thr = 0; s.rcs = 0; return ev; }
     const [gx, gy, tq, prox] = gravity(M, s, s.x, s.y); s.gx = gx; s.gy = gy; s.prox = prox;
     // attitude: PD autopilot -> commanded angular accel; RCS supplies (cmd - external torque), clamped
-    let wd = 0; if (inp.head != null) wd = Math.max(-K.WMAX, Math.min(K.WMAX, wrap(inp.head - s.ang) * K.KP)); else if (inp.turn) wd = inp.turn * K.WMAX;
+    // 3.4.1 input: dir/k = one-finger vector (nose follows, engine gated to ~30deg); brake = autopilot velocity-kill (retro-burn + RCS translation)
+    let head = inp.head, thrIn = inp.thr || 0, tax = 0, tay = 0; s.brk = 0; s.rcsT = 0;
+    const gate = e => Math.max(0, Math.min(1, (K.GATE_HI - Math.abs(e)) / (K.GATE_HI - K.GATE_LO)));
+    if (inp.brake) { s.brk = 1; const vt = inp.dir != null ? K.BRAKE_VT * Math.max(0, Math.min(1, inp.k || 0)) : 0, tvx = vt ? Math.cos(inp.dir) * vt : 0, tvy = vt ? Math.sin(inp.dir) * vt : 0;
+      const Dx = (tvx - s.vx) / K.BRAKE_TAU - gx, Dy = (tvy - s.vy) / K.BRAKE_TAU - gy, Dm = Math.hypot(Dx, Dy); head = null; thrIn = 0;
+      if (Dm > .5) { let g = 0; if (Dm > 14) { head = Math.atan2(Dy, Dx); g = gate(wrap(head - s.ang)); thrIn = Math.min(1, Dm / K.A_MAX) * g; }
+        const r = Math.min(K.RCS_T, Dm) * (1 - g); if (s.fuel > 0 && r > 0) { tax = Dx / Dm * r; tay = Dy / Dm * r; s.rcsT = r / K.RCS_T; } } }
+    else if (inp.dir != null) { head = inp.dir; thrIn = Math.max(0, Math.min(1, inp.k || 0)) * gate(wrap(inp.dir - s.ang)); }
+    let wd = 0; if (head != null) wd = Math.max(-K.WMAX, Math.min(K.WMAX, wrap(head - s.ang) * K.KP)); else if (inp.turn) wd = inp.turn * K.WMAX;
     let need = (wd - s.w) * K.KD - tq, rcs = Math.max(-K.AMAX, Math.min(K.AMAX, need));
     if (s.fuel <= 0 && Math.abs(rcs) > K.AMAX * .35) rcs = Math.sign(rcs) * K.AMAX * .35; // reserve cold gas: weak but never zero
     s.w += (rcs + tq) * dt; s.ang = wrap(s.ang + s.w * dt); s.rcs = Math.abs(rcs) / K.AMAX; s.rcsSide = Math.sign(rcs); s.ext = Math.abs(tq);
     // main engine with spool-up (heavy feel)
-    const tgt = s.fuel > 0 ? Math.max(0, Math.min(1, inp.thr || 0)) : 0; s.thr += (tgt - s.thr) * (1 - Math.exp(-dt / K.SPOOL));
-    const a = s.thr * K.A_MAX; let ax = gx + Math.cos(s.ang) * a, ay = gy + Math.sin(s.ang) * a;
-    if (s.fuel > 0) { s.fuel = Math.max(0, s.fuel - (s.thr * K.BURN + s.rcs * K.RCS_BURN) * dt); if (s.fuel === 0) ev.push({ e: 'empty' }); }
+    const tgt = s.fuel > 0 ? Math.max(0, Math.min(1, thrIn)) : 0; s.thr += (tgt - s.thr) * (1 - Math.exp(-dt / K.SPOOL));
+    const a = s.thr * K.A_MAX; let ax = gx + Math.cos(s.ang) * a + tax, ay = gy + Math.sin(s.ang) * a + tay;
+    if (s.fuel > 0) { s.fuel = Math.max(0, s.fuel - (s.thr * K.BURN + s.rcs * K.RCS_BURN + s.rcsT * K.RCS_T_BURN) * dt); if (s.fuel === 0) ev.push({ e: 'empty' }); }
     // soft map edge (force field, no death)
     const E = K.EDGE; if (s.x < E) ax += (E - s.x) * K.EDGE_K; if (s.x > M.W - E) ax -= (s.x - M.W + E) * K.EDGE_K; if (s.y < E) ay += (E - s.y) * K.EDGE_K; if (s.y > M.H - E) ay -= (s.y - M.H + E) * K.EDGE_K;
     s.vx += ax * dt; s.vy += ay * dt; let sp = Math.hypot(s.vx, s.vy);
@@ -120,17 +129,18 @@
     [1990, 470, 80], [2110, 380, 90], [2300, 350, 70], [2440, 340, 40]];
   function bot(M, s0) { let i = 0, wait = 0, flipQ = 0; const route = ROUTE.map(r => ({ x: r[0], y: r[1], v: r[2], tag: r[3], pol: r[4] }));
     if (s0 && s0.cp >= 0) { const c = M.cps[s0.cp]; i = route.findIndex(r => Math.hypot(r.x - c.x, r.y - c.y) < 40) + 1; }
-    return function (s) { const inp = { head: null, thr: 0, flip: false };
+    return function (s) { const inp = { dir: null, k: 0, brake: false, flip: false };
       if (s.docked) return inp; while (i < route.length - 1 && Math.hypot(s.x - route[i].x, s.y - route[i].y) < (route[i].tag === 'flare' ? 14 : 34)) {
         if (route[i].tag === 'flare') { const f = M.flares[0], ph = flarePhase(f, s.t); if (!(ph > f.on / f.per + .02 && ph < f.on / f.per + .12)) break; } i++; }
       const w = route[i], dx = w.x - s.x, dy = w.y - s.y, d = Math.hypot(dx, dy) || 1;
       // polarity: match the next barrier we are approaching
       for (const b of M.barriers) if (Math.abs(s.x - b.x) < 120 && s.y > b.y0 && s.y < b.y1 && b.pol !== s.pol && (s.vx <= 0 ? s.x > b.x : s.x < b.x)) { inp.flip = !flipQ; flipQ = 1; break; }
       if (!inp.flip) flipQ = 0;
-      if (w.tag === 'flare' && d < 30) { const n = route[i + 1]; inp.head = Math.atan2(n.y - s.y, n.x - s.x); inp.thr = 0; return inp; }
+      if (w.tag === 'flare' && d < 30) { const n = route[i + 1]; inp.dir = Math.atan2(n.y - s.y, n.x - s.x); inp.k = 0; return inp; }
       const vt = Math.min(w.v || 0, Math.sqrt(2 * 45 * d) + (w.v ? 0 : 0)), vdx = dx / d * vt, vdy = dy / d * vt;
       let ex = (vdx - s.vx) * 1.4 - s.gx * .9, ey = (vdy - s.vy) * 1.4 - s.gy * .9; if (w.v === 0 || i === route.length - 1) { ex = (dx * 1.2 - s.vx * 2) - s.gx; ey = (dy * 1.2 - s.vy * 2) - s.gy; }
-      const em = Math.hypot(ex, ey); if (em < 4) return inp; inp.head = Math.atan2(ey, ex); const al = Math.cos(wrap(inp.head - s.ang));
-      inp.thr = al > .8 ? Math.min(1, em / 70) : 0; return inp; }; }
+      const em = Math.hypot(ex, ey); if (em < 4) return inp; inp.dir = Math.atan2(ey, ex); inp.k = Math.cos(wrap(inp.dir - s.ang)) > .8 ? Math.min(1, em / 70) : 0;
+      // way too fast for this leg (e.g. after a slingshot): hold the brake like a player would
+      const sp = Math.hypot(s.vx, s.vy); if (w.v && sp > w.v + 70 && (s.vx * dx + s.vy * dy) / d < sp * .6) inp.brake = true; return inp; }; }
   root.BHSim51 = { STEP, K, build, newShip, launch, step, respawn, gravity, moonPos, flareOn, flarePhase, rockAt, nextGoal, wrap, bot, ROUTE };
 })(typeof window !== 'undefined' ? window : globalThis);
